@@ -1,5 +1,6 @@
 #include "util.h"
 #include <pthread.h>
+#include "cliente.h"
 
 // BUSQUEDA DE LISTAS
 
@@ -65,7 +66,7 @@ t_core *buscar_core_por_id(t_list *lista_cores, u_int32_t id_core)
     return NULL;
 }
 
-// Para cuando un job deja de usar el CORE
+// LIBERAR ESTRUCTURAS
 
 void liberar_socket_core(int socket_core)
 {
@@ -76,6 +77,12 @@ void liberar_socket_core(int socket_core)
     pthread_mutex_unlock(&mutex_lista_core);
 
     sem_post(&sem_cores);
+}
+
+void liberar_job(t_job *job)
+{
+    free(job->contexto);
+    free(job);
 }
 
 // MANEJO DE ESTADOS
@@ -124,6 +131,7 @@ void pasar_a_ready(t_job *job)
 {
     log_cambio_estado(job->jid, estado_a_string(job->estado), "READY");
     job->estado = READY;
+    clock_gettime(CLOCK_MONOTONIC, &job->tiempo_inicio_ready);
 
     pthread_mutex_lock(&mutex_cola_ready);
     list_add(cola_ready, job);
@@ -136,26 +144,44 @@ void pasar_a_exec(t_job *job)
 {
     char *estado_anterior = estado_a_string(job->estado);
     log_cambio_estado(job->jid, estado_anterior, "EXEC");
+    clock_gettime(CLOCK_MONOTONIC, &job->tiempo_inicio_exec);
     job->estado = EXEC;
 }
 
+
+
 // pasa un job a EXIT y libera un cupo de multiprogramacion
 // (esto lo tiene que llamar quien procese el FINALIZAR_JOB que manda el Core, ver nota de coordinacion abajo)
-void finalizar_job(t_job *job, char *motivo, u_int32_t id_core)
-{
-    
+void finalizar_job(t_job *job, char *motivo, u_int32_t id_core){
+
     log_cambio_estado(job->jid, estado_a_string(job->estado), "EXIT");
     job->estado = EXIT;
 
     log_info(logger, "## (%d) Finalizó su ejecución con motivo de %s. Estadísticas: %s", job->jid, motivo, "");
 
-    // Libero el core 
+    // Libero el core
     pthread_mutex_lock(&mutex_lista_core);
     t_core *core_actual = buscar_core_por_id(lista_cores, id_core);
     core_actual->libre = true;
+    core_actual->jid_actual = -1; //reseteo antes de liberar mutex
     pthread_mutex_unlock(&mutex_lista_core);
 
-    sem_post(&sem_cores);    
+    // Lo saco de la lista general ANTES de liberarlo
+    pthread_mutex_lock(&mutex_lista_jobs);
+    list_remove_element(lista_jobs, job);
+    pthread_mutex_unlock(&mutex_lista_jobs);
+
+    // le aviso a la Placa para que libere las instrucciones del Job
+    t_paquete *paquete = crear_paquete(FINALIZAR_JOB);
+    uint32_t jid_finalizado = job->jid;
+    agregar_a_paquete(paquete, &jid_finalizado, sizeof(uint32_t));
+    enviar_paquete(paquete, socket_placa);
+    eliminar_paquete(paquete);
+
+    // Elimino la estructura del job
+    liberar_job(job);
+
+    sem_post(&sem_cores);
     sem_post(&sem_cupo_multiprogramacion); // libero un lugar para que entre otro job de NEW
 }
 
@@ -173,4 +199,17 @@ void actualizar_contexto(u_int32_t jid, t_registros *registros)
 
     memcpy(job_encontrado->contexto, registros, sizeof(t_registros));
     pthread_mutex_unlock(&mutex_lista_jobs);
+}
+
+void actualizar_estimacion_prox_rafaga(t_job *job)
+{
+
+    struct timespec tiempo_actual;
+    clock_gettime(CLOCK_MONOTONIC, &tiempo_actual);
+
+    double segundos = tiempo_actual.tv_sec - job->tiempo_inicio_ready.tv_sec;
+    double nanosegundos = tiempo_actual.tv_nsec - job->tiempo_inicio_ready.tv_nsec;
+
+    double rafaga_real = segundos * 1000.0 + nanosegundos / 1000000.0;
+    job->estimacion_proxima_rafaga = hrrn_alfa * rafaga_real + (1.0 - hrrn_alfa) * job->estimacion_proxima_rafaga;
 }

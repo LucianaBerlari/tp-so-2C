@@ -10,7 +10,18 @@
 
 extern t_log *logger;
 extern t_config *config;
+extern t_log_level log_level;
+
 extern char *algoritmo_planificacion;
+
+extern int rr_quantum;
+extern int estimacion_inicial;
+extern double hrrn_alfa;
+extern int grado_max_multiprogramacion;
+
+extern char *path_datos;
+extern int retardo_loader;
+extern char *path_reportes;
 
 typedef enum{
     NEW,
@@ -24,6 +35,12 @@ typedef struct{
     u_int32_t jid;
     t_registros* contexto;
     t_estado estado;
+
+    double estimacion_proxima_rafaga;
+
+    struct timespec tiempo_inicio_ready;
+    struct timespec tiempo_inicio_exec;
+
 }t_job;
 
 typedef struct{
@@ -32,12 +49,14 @@ typedef struct{
     int socket_interrupt;
     bool libre;
     u_int32_t jid_actual;
-
 }t_core;
 
 void incializar_mutex();
 void incializar_semaforos();
 void incializar_listas();
+void finalizar_planificador();
+
+void obtener_config();
 
 // LISTA DE TODOS LOS JOBS
 
@@ -65,22 +84,11 @@ extern pthread_mutex_t mutex_cola_block;
 extern sem_t sem_cola_block;
 
 
-
 // MULTIPROGRAMACIÓN
-
 extern sem_t sem_cupo_multiprogramacion;
 
-// FUNCIONES GENERALES
-
-//t_core *obtener_core_libre();
-//t_job *buscar_por_jid(t_list *lista_job, u_int32_t jid);
-//char *estado_a_string(t_estado estado);
-
-//t_job *buscar_job_por_jid(t_list *lista_job, u_int32_t jid);
-/*void finalizar_job(t_job *job, char *motivo);
-void pasar_a_ready(t_job *job);
-void encolar_new(t_job *job);*/
-
-
+// 
+extern u_int32_t contador_pid;
+extern pthread_mutex_t mutex_contador_pid;
 
 #endif

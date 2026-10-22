@@ -15,11 +15,12 @@
 #include <utils/protocolo.h>
 #include <utils/util.h>
 #include "ciclo_de_instruccion.h"
+#include "mmu.h"
 
 t_log *logger = NULL;
 t_config *config = NULL;
 
-int hay_interrupcion = 0; // 0 false || 1 true
+// int hay_interrupcion = 0; // 0 false || 1 true
 
 int main(int argc, char *argv[])
 {
@@ -69,13 +70,7 @@ int main(int argc, char *argv[])
     log_info(logger, "Iniciando modulo CORE [%s]", id_core);
 
 
-    // paquete serializado de prueba
-    /*t_paquete* paquete_prueba = crear_paquete(CO);
-    char* msg = "Paquete de prueba Checkpoint 1";
-    agregar_a_paquete(paquete_prueba, msg, strlen(msg) + 1);
-    agregar_a_paquete(paquete_prueba, id_core, strlen(id_core) + 1);
-    enviar_paquete(paquete_prueba, socket_planificador);
-    eliminar_paquete(paquete_prueba);*/
+    
     // 1. Conexion dispatch
     socket_dispatch = conectar_con_planificador(ip_planificador, puerto_planificador, atoi(id_core),CONEXION_DISPATCH);
     if (socket_dispatch == -1)
@@ -95,6 +90,7 @@ int main(int argc, char *argv[])
 
     // 3. Conexion con placa
     socket_placa = conectar_con_placa(ip_placa, puerto_placa, atoi(id_core));
+    
     if (socket_placa == -1)
     {
         liberar_conexion(socket_dispatch);
@@ -102,6 +98,23 @@ int main(int argc, char *argv[])
         terminar_modulo();
         return EXIT_FAILURE;
     }
+
+
+    // CP 3, acá se inicializa la mmu
+    if (!mmu_inicializar(socket_placa))
+    {
+        log_error(logger, "No se pudo inicializar la MMU con la Placa");
+
+        liberar_conexion(socket_dispatch);
+        liberar_conexion(socket_interrupt);
+        liberar_conexion(socket_placa);
+        terminar_modulo();
+
+        return EXIT_FAILURE;
+    }
+
+    interrupciones_pendientes = list_create();
+
 
     crear_hilo_escucha();
     while (1)
@@ -120,9 +133,14 @@ int main(int argc, char *argv[])
             t_registros contexto_recibido;
 
             recibir_contexto(socket_dispatch, &jid, &contexto_recibido); // core extrae paquete de jid y su estado anterior
-            log_info(logger, "## Proceso despachado - JID: %d", jid);
 
-            cargar_contexto(&contexto_recibido);                          // volcamos los datos obtenidos a la variable global registros_cpu
+            cargar_contexto(&contexto_recibido); 
+            
+            descartar_interrupciones_de_otros_jids(jid);
+
+            log_info(logger, "## Proceso despachado - JID: %u", jid);
+            
+            // volcamos los datos obtenidos a la variable global registros_cpu
             ciclo_de_instruccion(socket_dispatch, socket_placa, jid); // el core entra a ejecutar las instrucciones del proceso en un bucle local
             break;
         }
@@ -136,6 +154,7 @@ int main(int argc, char *argv[])
     liberar_conexion(socket_dispatch);
     liberar_conexion(socket_interrupt);
     liberar_conexion(socket_placa);
+    list_destroy_and_destroy_elements(interrupciones_pendientes, free);
     terminar_modulo();
 
     return EXIT_SUCCESS;

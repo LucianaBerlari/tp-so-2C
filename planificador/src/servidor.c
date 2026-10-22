@@ -1,6 +1,7 @@
 #include "servidor.h"
 #include "planificador.h"
 #include "util.h"
+#include "plani_largo_plazo.h"
 
 #include <stdlib.h>
 #include <pthread.h>
@@ -13,8 +14,6 @@
 #include <utils/comunicacion.h>
 #include <utils/protocolo.h>
 #include <utils/util.h>
-
-int socket_c;
 
 void *iniciar_conexion_como_servidor(void *arg)
 {
@@ -55,14 +54,6 @@ void *iniciar_conexion_como_servidor(void *arg)
         pthread_create(&thread, NULL, atender_core, fd_ptr);
         pthread_detach(thread);
     }
-}
-
-bool comparar_por_socket(void *ptr)
-{
-
-    t_core *core = (t_core *)ptr;
-
-    return core->socket_dispatch == socket_c;
 }
 
 void *atender_core(void *arg)
@@ -139,12 +130,29 @@ void *atender_core(void *arg)
             log_warning(logger, "Se desconecto CORE");
 
             pthread_mutex_lock(&mutex_lista_core);
-            t_core *core_a_eliminar = (t_core *)list_remove_by_condition(lista_cores, comparar_por_socket);
+            t_core *core_a_eliminar = buscar_core_por_id(lista_cores, core->id_core);
+            list_remove_element(lista_cores, core_a_eliminar);
             pthread_mutex_unlock(&mutex_lista_core);
 
-            free(core_a_eliminar);
-            sem_wait(&sem_cores);
+            if (!core_a_eliminar->libre)
+            {
+                pthread_mutex_lock(&mutex_lista_jobs);
+                t_job *job_actual = buscar_job_por_jid(lista_jobs, core_a_eliminar->jid_actual);
+                pthread_mutex_unlock(&mutex_lista_jobs);
+
+                if (job_actual != NULL)
+                {
+                    pasar_a_ready(job_actual);
+                }
+                // No hago sem wait aca porque ya se hizo en el plani de corto plazo cuando se paso el job a exc
+            }
+            else
+            {
+                sem_wait(&sem_cores);
+            }
+
             liberar_conexion(core->socket_dispatch);
+            free(core_a_eliminar);
             return NULL;
         }
 
@@ -165,25 +173,45 @@ void *atender_core(void *arg)
         {
             u_int32_t jid;
             t_registros registros;
-            recibir_contexto(core->socket_dispatch, &jid, &registros);
-           
-            // FALTA RECIBIR EL MOTIVO DE DESALOJAR JOB
+            t_motivo_desalojo motivo;
+            recibir_desalojo(core->socket_dispatch, &jid, &registros, &motivo);
 
             actualizar_contexto(jid, &registros);
 
             pthread_mutex_lock(&mutex_lista_jobs);
             t_job *job_encontrado = buscar_job_por_jid(lista_jobs, jid);
+            if (job_encontrado == NULL)
+            {
+                log_error(logger, "Desalojo de un Job inexistente - JID: %u", jid);
+                pthread_mutex_unlock(&mutex_lista_jobs);
+                break;
+            }
             pthread_mutex_unlock(&mutex_lista_jobs);
 
-            pasar_a_ready(job_encontrado);
+            switch (motivo)
+            {
+            case FIN_QUANTUM:
+            { // RR: se le acabo el turno pero no termino -> vuelve a READY
+                log_info(logger, "## (%u) - Desalojado por fin de quantum", jid);
+                pasar_a_ready(job_encontrado);
+                break;
+            }
+            case SYSCALL_BLOQUEANTE:
+            { // termino su rafaga de CPU -> se recalcula la estimacion (HRRN)
+                actualizar_estimacion_prox_rafaga(job_encontrado);
+                break;
+            }
+            default:
+                log_error(logger, "## (%u) - Motivo de desalojo desconocido: %d", jid, motivo);
+                break;
+            }
 
-            // Libero el core
+            // en cualquier caso el Core nos devolvio el Job, asi que queda libre
             pthread_mutex_lock(&mutex_lista_core);
-            t_core *core_actual = buscar_core_por_id(lista_cores, id_core);
-            core_actual->libre = true;
+            core->libre = true;
             pthread_mutex_unlock(&mutex_lista_core);
-
             sem_post(&sem_cores);
+
             break;
         }
         case FINALIZAR_JOB:
@@ -194,6 +222,23 @@ void *atender_core(void *arg)
 
             recibir_contexto(core->socket_dispatch, &jid, &registros);
 
+            log_info(logger, "========== REGISTROS ==========");
+            log_info(logger, "PC: %u", registros.PC);
+            log_info(logger, "AX: %u", registros.AX);
+            log_info(logger, "BX: %u", registros.BX);
+            log_info(logger, "CX: %u", registros.CX);
+            log_info(logger, "DX: %u", registros.DX);
+            log_info(logger, "P0: %u", registros.P0);
+            log_info(logger, "P1: %u", registros.P1);
+            log_info(logger, "P2: %u", registros.P2);
+            log_info(logger, "P3: %u", registros.P3);
+            log_info(logger, "P4: %u", registros.P4);
+            log_info(logger, "P5: %u", registros.P5);
+            log_info(logger, "E1: %u", registros.E1);
+            log_info(logger, "E2: %u", registros.E2);
+            log_info(logger, "E3: %u", registros.E3);
+            log_info(logger, "===============================");
+
             actualizar_contexto(jid, &registros);
 
             pthread_mutex_lock(&mutex_lista_jobs);
@@ -202,6 +247,45 @@ void *atender_core(void *arg)
 
             finalizar_job(job_encontrado, "EXIT", id_core);
 
+            break;
+        }
+        // SYSCALLS
+        case INIT_JOB:
+        {
+            t_list *paquete = recibir_paquete(core->socket_dispatch);
+            u_int32_t pid = *(u_int32_t *)list_get(paquete, 0); // sirve  para las estadisticas
+            char *path_job_nuevo = list_get(paquete, 1);
+
+            log_info(logger, "## (%u) - Solicitó syscall: INIT_JOB", pid);
+
+            t_job *job_nuevo = crear_job();
+            u_int32_t jid_nuevo = job_nuevo->jid; // lo guardo antes: si falla, el job se libera
+
+            t_solicitud_pendiente *peticion = crear_solicitud_pendiente(jid_nuevo, CREAR_JOB);
+            enviar_crear_job_a_placa(jid_nuevo, path_job_nuevo, peticion->id_solicitd);
+            sem_wait(&peticion->sem_respuesta);
+
+            if (peticion->exito)
+            {
+                encolar_new(job_nuevo);
+            }
+            else
+            {
+                log_error(logger, "Respuesta sin exito para crear el Job con pid %u en placa", jid_nuevo);
+
+                pthread_mutex_lock(&mutex_lista_jobs);
+                list_remove_element(lista_jobs, job_nuevo);
+                liberar_job(job_nuevo);
+                exit(EXIT_FAILURE);
+            }
+            eliminar_solicitud_pendiente(peticion);
+            list_destroy_and_destroy_elements(paquete, free);
+
+            // INIT_JOB no bloquea: el Core espera esta respuesta y sigue ejecutando
+            t_paquete *respuesta = crear_paquete(RESPUESTA_SYSCALL);
+            agregar_a_paquete(respuesta, &jid_nuevo, sizeof(u_int32_t));
+            enviar_paquete(respuesta, core->socket_dispatch);
+            eliminar_paquete(respuesta);
             break;
         }
 
