@@ -143,6 +143,10 @@ void *atender_cliente(void *arg)
 
         case PEDIR_TAM_PAGINA:
         {
+            //agrego esto para probar alloc
+            int size;
+            recv(socket_cliente, &size, sizeof(int), MSG_WAITALL);
+
             uint32_t tam_pag = (uint32_t)config_valores.tam_pagina;
             t_paquete *paquete = crear_paquete(RESPUESTA_TAM_PAGINA);
             agregar_a_paquete(paquete, &tam_pag, sizeof(uint32_t));
@@ -292,7 +296,7 @@ void *atender_cliente(void *arg)
             t_job *job = dictionary_get(diccionario_jobs, clave);
             free(clave);
 
-            uint32_t dir_logica = 0;
+            uint32_t dir_logica = UINT32_MAX; // Nio lo incializo con 0 porque puede ser una direccion logica válida y no sirve para detectar error
             if (job != NULL)
             {
                 dir_logica = asignar_espacio_job(job, tamanio);
@@ -312,7 +316,7 @@ void *atender_cliente(void *arg)
             {
                 mensaje_rta = "ASIGNAR_ESPACIO_OK";
                 agregar_a_paquete(paquete, mensaje_rta, strlen(mensaje_rta));
-                agregar_a_paquete(paquete, &dir_logica, sizeof(uint32_t));
+                agregar_a_paquete(paquete, &dir_logica, sizeof(uint32_t) + 1);
             }
 
             enviar_paquete(paquete, socket_cliente);
@@ -334,17 +338,18 @@ void *atender_cliente(void *arg)
             t_job *job = dictionary_get(diccionario_jobs, clave);
             free(clave);
 
+            char *respuesta = "LIBERACION_DE_ESPACIO_ERROR";
             if (job != NULL)
             {
                 // uint32_t tamanio_a_liberar = job->tamanio_alloc - dir_logica;
-                liberar_espacio_job(job, dir_logica);
+                respuesta = liberar_espacio_job(job, dir_logica);
             }
             pthread_mutex_unlock(&mutex_jobs);
 
             t_paquete *paquete = crear_paquete(RESPUESTA_SOLICITUD);
-             agregar_a_paquete(paquete, &id_solicitud, sizeof(id_solicitud));
-            char *ok_msg = "LIBERACION_OK";
-            agregar_a_paquete(paquete, ok_msg, strlen(ok_msg) + 1);
+            agregar_a_paquete(paquete, &id_solicitud, sizeof(id_solicitud));
+            // char *ok_msg = "LIBERACION_OK";
+            agregar_a_paquete(paquete, respuesta, strlen(respuesta) + 1);
             enviar_paquete(paquete, socket_cliente);
             eliminar_paquete(paquete);
 
