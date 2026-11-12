@@ -5,7 +5,7 @@
 char *modulo_a_string(int modulo)
 {
 
-    char *respuesta;
+    char *respuesta = "DESCONOCIDO";
 
     if (modulo == PLANIFICADOR)
     {
@@ -119,6 +119,9 @@ char *motivo_de_desalojo_a_string(t_motivo_desalojo motivo)
         case SYSCALL_LOAD_BATCH: return "LOAD_BATCH";
         case SYSCALL_LABEL: return "LABEL";
         case SYSCALL_REPORT: return "REPORT";
+        case SYSCALL_SAVE_CHECKPOINT: return "SAVE_CHECKPOINT";
+        case SYSCALL_LOAD_CHECKPOINT: return "LOAD_CHECKPOINT";
+        case SYSCALL_DELETE_CHECKPOINT: return "DELETE_CHECKPOINT";
         default :   return "DESCONOCIDO";
     }
 }

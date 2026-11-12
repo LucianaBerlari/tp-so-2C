@@ -99,7 +99,7 @@ char *estado_a_string(t_estado estado)
     case EXEC:
         return "EXEC";
     case BLOCK:
-        return "BLOCK";
+        return "BLOCKED";
     case EXIT:
         return "EXIT";
     default:
@@ -163,14 +163,23 @@ void finalizar_job(t_job *job, char *motivo, u_int32_t id_core){
     log_cambio_estado(job->jid, estado_a_string(job->estado), "EXIT");
     job->estado = EXIT;
 
-    log_info(logger, "## (%d) Finalizó su ejecución con motivo de %s. Estadísticas: %s", job->jid, motivo, "");
+        log_info(logger, "## (%u) finalizó su ejecución con motivo de %s. Estadísticas: Page Faults: %u - Syscalls: %u",
+             job->jid, motivo, job->cant_page_faults, job->cant_syscalls);
 
-    // Libero el core
-    pthread_mutex_lock(&mutex_lista_core);
-    t_core *core_actual = buscar_core_por_id(lista_cores, id_core);
-    core_actual->libre = true;
-    core_actual->jid_actual = -1; //reseteo antes de liberar mutex
-    pthread_mutex_unlock(&mutex_lista_core);
+    // Libero el core (si el Job estaba en uno)
+    bool libero_core = false;
+    if (id_core != SIN_CORE)
+    {
+        pthread_mutex_lock(&mutex_lista_core);
+        t_core *core_actual = buscar_core_por_id(lista_cores, id_core);
+        if (core_actual != NULL) // el Core se pudo haber desconectado
+        {
+            core_actual->libre = true;
+            core_actual->jid_actual = -1;
+            libero_core = true;
+        }
+        pthread_mutex_unlock(&mutex_lista_core);
+    }
 
     // Lo saco de la lista general ANTES de liberarlo
     pthread_mutex_lock(&mutex_lista_jobs);
@@ -187,7 +196,8 @@ void finalizar_job(t_job *job, char *motivo, u_int32_t id_core){
     // Elimino la estructura del job
     liberar_job(job);
 
-    sem_post(&sem_cores);
+    if (libero_core)
+        sem_post(&sem_cores);
     sem_post(&sem_cupo_multiprogramacion); // libero un lugar para que entre otro job de NEW
 }
 
@@ -218,4 +228,16 @@ void actualizar_estimacion_prox_rafaga(t_job *job)
 
     double rafaga_real = segundos * 1000.0 + nanosegundos / 1000000.0;
     job->estimacion_proxima_rafaga = hrrn_alfa * rafaga_real + (1.0 - hrrn_alfa) * job->estimacion_proxima_rafaga;
+}
+
+// Log obligatorio de syscall + contador para las estadisticas
+void registrar_syscall(u_int32_t jid, char *nombre_syscall)
+{
+    log_info(logger, "## (%u) - Solicitó syscall: %s", jid, nombre_syscall);
+
+    pthread_mutex_lock(&mutex_lista_jobs);
+    t_job *job = buscar_job_por_jid(lista_jobs, jid);
+    if (job != NULL)
+        job->cant_syscalls++;
+    pthread_mutex_unlock(&mutex_lista_jobs);
 }

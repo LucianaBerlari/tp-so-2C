@@ -388,9 +388,10 @@ bool mmu_deslockear_paginas(
     int socket_placa,
     uint32_t jid)
 {
+
     if (socket_placa < 0)
     {
-        if (logger != NULL)
+        if (logger == NULL)
         {
             log_error(
                 logger,
@@ -416,6 +417,10 @@ bool mmu_deslockear_paginas(
     enviar_paquete(paquete, socket_placa);
     eliminar_paquete(paquete);
 
+    log_debug(logger,
+              "## JID: %u - MMU - Esperando respuesta de DESLOCKEAR_PAGINAS",
+              jid);
+
     int codigo_operacion = recibir_operacion(socket_placa);
 
     if (codigo_operacion == -1)
@@ -430,6 +435,9 @@ bool mmu_deslockear_paginas(
 
         return false;
     }
+    log_debug(logger,
+              "## JID: %u - MMU - Codigo recibido al deslockear: %d",
+              jid, codigo_operacion);
 
     if (codigo_operacion != RESPUESTA_SOLICITUD)
     {
@@ -457,6 +465,10 @@ bool mmu_deslockear_paginas(
     bool correcto = respuesta != NULL &&
                     strcmp(respuesta, "OK") == 0;
 
+    log_debug(logger,
+              "## JID: %u - MMU - Respuesta de deslockeo: %s",
+              jid, respuesta != NULL ? respuesta : "NULL");
+
     destruir_lista_paquete(valores);
 
     if (correcto && logger != NULL)
@@ -465,6 +477,19 @@ bool mmu_deslockear_paginas(
             logger,
             "## JID: %u - MMU - Páginas deslockeadas",
             jid);
+    }
+
+    if (correcto)
+    {
+        log_debug(logger,
+                  "## JID: %u - MMU - Paginas deslockeadas correctamente",
+                  jid);
+    }
+    else
+    {
+        log_error(logger,
+                  "## JID: %u - MMU - Placa no confirmo el deslockeo",
+                  jid);
     }
 
     return correcto;
@@ -701,6 +726,7 @@ static t_resultado_mmu leer_segmento_fisico(
     list_destroy_and_destroy_elements(
         respuesta,
         free);
+    log_info(logger,"## JID: %u - Acción: Lectura - Dirección Física: %u - Tamaño: %u",jid, segmento->direccion_fisica ,segmento->tamanio);
 
     return MMU_OK;
 }
@@ -749,6 +775,18 @@ static t_resultado_mmu escribir_segmento_fisico(
 
     int codigo = recibir_operacion(socket_placa);
 
+    t_list *respuesta = recibir_paquete(socket_placa);
+
+    if (respuesta == NULL)
+    {
+        log_error(logger,
+                  "## JID: %u - Error al recibir respuesta de escritura",
+                  jid);
+        return MMU_ERROR;
+    }
+
+    list_destroy_and_destroy_elements(respuesta, free);
+
     if (codigo != RESPUESTA_ESCRITURA)
     {
         if (logger != NULL)
@@ -762,6 +800,8 @@ static t_resultado_mmu escribir_segmento_fisico(
 
         return MMU_ERROR;
     }
+
+    log_info(logger,"## JID: %u - Acción: Escritura - Dirección Física: %u - Tamaño: %u",jid ,segmento->direccion_fisica ,segmento->tamanio);
 
     return MMU_OK;
 }

@@ -118,7 +118,7 @@ bool placa_leer_memoria_job(int socket, uint32_t jid, t_list *direcciones, void 
 
 bool placa_escribir_memoria_job(int socket, uint32_t jid, t_list *direcciones, void *buffer_origen)
 {
-    uint32_t desplazamiento = 0;
+     uint32_t desplazamiento = 0;
 
     for (int i = 0; i < list_size(direcciones); i++)
     {

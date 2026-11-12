@@ -1,5 +1,6 @@
 #ifndef UTIL_H_
 #define UTIL_H_
+#define SIN_CORE UINT32_MAX   // para finalizar un Job que no esta en ningun Core
 
 #include "planificador.h"
 
@@ -33,4 +34,6 @@ void finalizar_job(t_job *job, char *motivo, u_int32_t id_core);
 void actualizar_contexto(u_int32_t jid, t_registros *registros);
 void actualizar_estimacion_prox_rafaga(t_job *job);
 
+// REGISTRO DE SYSCALLS
+void registrar_syscall(u_int32_t jid, char *nombre_syscall);
 #endif

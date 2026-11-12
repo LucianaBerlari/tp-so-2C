@@ -6,6 +6,7 @@
 #include <commons/string.h>   
 #include <string.h>
 #include <pthread.h>
+#include "journal.h"
 
 
 t_geometria geometria;
@@ -205,10 +206,11 @@ static int buscar_entrada_libre(void){
     return i;}
   return -1; // indicamos directorio lleno
 }
-// Devuelve el primer bloque de datos libre fat==0
-// Arranca en el primer bloque de datos: los anteriores estan reservados
-static int buscar_bloque_libre(void){
-  for (uint32_t bloque =geometria.primer_bloque_datos ; bloque< geometria.cant_bloques; bloque++){
+// Busco el primer bloque libre a partir desde
+//no marca nada: el que llama se encarga de pedir dos veces el mismo
+//pidiendo siempre desde el siguiente al ultimo elegido
+static int buscar_bloque_libre(uint32_t  desde){
+  for (uint32_t bloque =desde ; bloque< geometria.cant_bloques; bloque++){
     if(leer_entrada_fat(bloque)==FAT_LIBRE)
     return bloque;
   }
@@ -283,24 +285,41 @@ for (uint32_t i = 0; i < cant_reusados; i++)
     nuevos[i] = viejos[i];
 
 // y si faltan, tomo libres (cada uno lo marco FIN apenas lo tomo)
+uint32_t desde = geometria.primer_bloque_datos;
 for (uint32_t i = cant_reusados; i < cant_nuevos; i++)
 {
-    int libre = buscar_bloque_libre();
+    int libre = buscar_bloque_libre(desde);
     if (libre == -1)
     {
-        // como no alcanza, devuelvo solo los que tome en este intento
-        for (uint32_t j = cant_reusados; j < i; j++)
-            escribir_entrada_fat(nuevos[j], FAT_LIBRE);
-
         log_error(logger, "## ERROR - Falta de espacio en FAT al intentar guardar: %s", nombre);
         free(viejos);
         free(nuevos);
         pthread_mutex_unlock(&mutex_filesystem);
         return false;
     }
-    escribir_entrada_fat(libre, FAT_FIN);
     nuevos[i] = libre;
+    desde = libre+1; // la proxima busqueda arranca despues de este
 }
+uint32_t id_asiento = journal_iniciar_asiento();   
+// anotar journal nuevo
+for(uint32_t i=0; i<cant_nuevos; i++)
+journal_op_fat(id_asiento, nuevos[i], (i+1<cant_nuevos)? nuevos[i+1] : FAT_FIN);
+
+for(uint32_t i = cant_reusados; i<cant_viejos; i++)
+journal_op_fat(id_asiento, viejos[i], FAT_LIBRE);
+
+void *buffer_journal = malloc(geometria.tam_bloque);
+for(uint32_t i=0; i<cant_nuevos; i++){
+  uint32_t desde_byte = i*geometria.tam_bloque;
+  uint32_t restante = tamanio -desde_byte;
+  uint32_t a_copiar= (restante<geometria.tam_bloque) ? restante :geometria.tam_bloque;
+  memset(buffer_journal, 0,geometria.tam_bloque);
+  memcpy(buffer_journal, contenido+desde_byte, a_copiar);
+  journal_op_write(id_asiento, nuevos[i], buffer_journal, geometria.tam_bloque);
+}
+free(buffer_journal);
+journal_op_dir(id_asiento, indice, nombre, tamanio, nuevos[0]);
+journal_commit(id_asiento); 
 
   //paso 4, encadenamos en la fat, cada bloque apunta al siguiente
   for(uint32_t i = 0; i<cant_nuevos;i++){
@@ -330,6 +349,7 @@ for (uint32_t i = cant_reusados; i < cant_nuevos; i++)
     entrada.tamanio = tamanio;
     entrada.primer_bloque = nuevos[0];
     escribir_entrada_directorio(indice, &entrada);
+    journal_applied(id_asiento);       
 
     log_info(logger, "## Guardado Checkpoint: %s - Tamaño: %u completada", nombre, tamanio);
 
@@ -384,12 +404,22 @@ for (uint32_t i = cant_reusados; i < cant_nuevos; i++)
     // liberamos todos los bloques de su cadena
     uint32_t cant_bloques;
     uint32_t *bloques =obtener_cadena(&entrada, &cant_bloques);
+    // hasta aca solo decidimos
+    uint32_t id_asiento = journal_iniciar_asiento();
+    for(uint32_t i=0; i<cant_bloques; i++)
+    journal_op_fat(id_asiento, bloques[i], FAT_LIBRE);
+    journal_op_dir(id_asiento, indice, "", 0,0);
+    journal_commit(id_asiento);
+    //desde aca lo aplicamos
+
+
     for(uint32_t i = 0; i<cant_bloques; i++){
       escribir_entrada_fat(bloques[i],FAT_LIBRE);}
 
       //marcamos la entrada del directorio como libre
       entrada.estado = 0;
       escribir_entrada_directorio (indice, &entrada);
+      journal_applied(id_asiento);
        log_info(logger, "## Eliminacion Checkpoint: %s - Tamaño: %u completada", nombre, entrada.tamanio);
 
        free(bloques);

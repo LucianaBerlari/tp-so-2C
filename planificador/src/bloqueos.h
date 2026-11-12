@@ -19,16 +19,18 @@ typedef struct
     t_list *direcciones;    // syscalls de memoria: t_direccion_fisica*, una por pagina
 } t_peticion_bloqueo;
 
-typedef bool (*t_atencion)(int socket_placa, t_peticion_bloqueo *peticion);
+typedef bool (*t_atencion)(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
 
 typedef struct
 {
     char *nombre;
     bool es_servicio;    // los servicios loguean inicio/fin y deslockean al terminar (page fault no)
+    bool es_checkpoint;
     t_list *cola;
     pthread_mutex_t mutex;
     sem_t sem_pendientes;
     int socket_placa;    // conexion propia, solo la usa el hilo de esta cola
+    int socket_storage;
     t_atencion atender;
 } t_cola_bloqueo;
 

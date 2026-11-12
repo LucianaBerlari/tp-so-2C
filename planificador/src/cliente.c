@@ -10,9 +10,6 @@
 #include <utils/util.h>
 #include <planificador.h>
 
-int socket_placa;
-int socket_storage;
-
 // Inicializa las conexiones del Planificador con Placa y Storage.
 void iniciar_conexiones(t_config *config)
 {
@@ -159,11 +156,11 @@ void *escuchar_placa_storage(void *arg)
                 }
                 else if (strcmp(respuesta, "ASIGNAR_ESPACIO_OK") == 0)
                 {
-                    uint32_t* direccion_logica =  malloc(sizeof(u_int32_t));
+                    uint32_t *direccion_logica = malloc(sizeof(u_int32_t));
                     *direccion_logica = *(uint32_t *)list_get(paquete, 2);
 
                     solicitud->exito = true;
-                    solicitud->respuesta=direccion_logica;
+                    solicitud->respuesta = direccion_logica;
                 }
                 else if (strcmp(respuesta, "ASIGNAR_ESPACIO_ERROR") == 0)
                 {
@@ -173,13 +170,23 @@ void *escuchar_placa_storage(void *arg)
                 {
                     solicitud->exito = true;
                 }
-                 else if (strcmp(respuesta, "LIBERACION_DE_ESPACIO_ERROR") == 0)
+                else if (strcmp(respuesta, "LIBERACION_DE_ESPACIO_ERROR") == 0)
+                {
+                    solicitud->exito = false;
+                }
+                else if (strcmp(respuesta, "ESCRITURA_EXITOSA") == 0)
                 {
                     solicitud->exito = true;
+                    log_debug(logger, "respuesta escritura exitosa");
+                }
+                else if (strcmp(respuesta, "ESCRITURA_ERROR") == 0)
+                {
+                    solicitud->exito = false;
+                    log_debug(logger, "respuesta escritura error");
                 }
                 else
                 {
-                    log_error(logger,"Respuesta desconocida: %s - Solicitud: %u - Operacion: %d",respuesta,solicitud->id_solicitd,solicitud->operacion);
+                    log_error(logger, "Respuesta desconocida: %s - Solicitud: %u - Operacion: %d", respuesta, solicitud->id_solicitd, solicitud->operacion);
                 }
 
                 sem_post(&solicitud->sem_respuesta);

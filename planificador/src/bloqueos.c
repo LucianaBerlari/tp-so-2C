@@ -1,5 +1,6 @@
 #include "bloqueos.h"
 #include "conexion_placa.h"
+#include "conexion_storage.h"
 #include "util.h"
 
 #include <stdio.h>
@@ -18,6 +19,10 @@ static t_cola_bloqueo *servicio_loader;
 static t_cola_bloqueo *servicio_labeler;
 static t_cola_bloqueo *servicio_logger;
 
+static t_cola_bloqueo *checkpoint_save;
+static t_cola_bloqueo *checkpoint_load;
+static t_cola_bloqueo *checkpoint_delete;
+
 // Para deslockear cuando se desconecta un Core (lo pueden usar varios hilos a la vez -> mutex)
 static int socket_placa_general;
 static pthread_mutex_t mutex_socket_placa_general = PTHREAD_MUTEX_INITIALIZER;
@@ -25,24 +30,35 @@ static pthread_mutex_t mutex_socket_placa_general = PTHREAD_MUTEX_INITIALIZER;
 // Logger del servicio Logger: archivo distinto al log del modulo
 static t_log *logger_reportes;
 
-static bool atender_page_fault(int socket_placa, t_peticion_bloqueo *peticion);
-static bool atender_loader(int socket_placa, t_peticion_bloqueo *peticion);
-static bool atender_labeler(int socket_placa, t_peticion_bloqueo *peticion);
-static bool atender_logger(int socket_placa, t_peticion_bloqueo *peticion);
+static bool atender_page_fault(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_loader(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_labeler(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_logger(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_checkpoint_save(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_checkpoint_load(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+static bool atender_checkpoint_delete(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion);
+
 static void *hilo_cola_bloqueo(void *arg);
 
 // ---------------- INICIALIZACION ----------------
 
-static t_cola_bloqueo *crear_cola_bloqueo(char *nombre, bool es_servicio, t_atencion atender)
+static t_cola_bloqueo *crear_cola_bloqueo(char *nombre, bool es_servicio, bool es_checkpoint, t_atencion atender)
 {
     t_cola_bloqueo *cola = malloc(sizeof(t_cola_bloqueo));
 
     cola->nombre = nombre;
     cola->es_servicio = es_servicio;
+    cola->es_checkpoint = es_checkpoint;
     cola->cola = list_create();
     pthread_mutex_init(&cola->mutex, NULL);
     sem_init(&cola->sem_pendientes, 0, 0);
     cola->socket_placa = conectar_placa_dedicada(nombre);
+
+    cola->socket_storage=-1;
+    if (es_checkpoint)
+    {
+        cola->socket_storage = conectar_storage_dedicada(nombre);
+    } 
     cola->atender = atender;
 
     pthread_t hilo;
@@ -63,10 +79,14 @@ void iniciar_bloqueos(void)
 
     socket_placa_general = conectar_placa_dedicada("DESLOCKEOS");
 
-    cola_page_fault  = crear_cola_bloqueo("PAGE_FAULT", false, atender_page_fault);
-    servicio_loader  = crear_cola_bloqueo("LOADER", true, atender_loader);
-    servicio_labeler = crear_cola_bloqueo("LABELER", true, atender_labeler);
-    servicio_logger  = crear_cola_bloqueo("LOGGER", true, atender_logger);
+    cola_page_fault = crear_cola_bloqueo("PAGE_FAULT", false, false, atender_page_fault);
+    servicio_loader = crear_cola_bloqueo("LOADER", true, false, atender_loader);
+    servicio_labeler = crear_cola_bloqueo("LABELER", true, false, atender_labeler);
+    servicio_logger = crear_cola_bloqueo("LOGGER", true, false, atender_logger);
+
+    checkpoint_save = crear_cola_bloqueo("CHECKPOINT_SAVE", false, true, atender_checkpoint_save);
+    checkpoint_load = crear_cola_bloqueo("CHECKPOINT_LOAD", false, true, atender_checkpoint_load);
+    checkpoint_delete = crear_cola_bloqueo("CHECKPOINT_DELETE", false, true, atender_checkpoint_delete);
 }
 
 // ---------------- ENTRADA A BLOCK ----------------
@@ -74,18 +94,30 @@ void iniciar_bloqueos(void)
 bool es_motivo_de_bloqueo(t_motivo_desalojo motivo)
 {
     return motivo == PAGE_FAULT || motivo == SYSCALL_LOAD_BATCH ||
-           motivo == SYSCALL_LABEL || motivo == SYSCALL_REPORT;
+           motivo == SYSCALL_LABEL || motivo == SYSCALL_REPORT ||
+           motivo == SYSCALL_SAVE_CHECKPOINT || motivo == SYSCALL_LOAD_CHECKPOINT || motivo == SYSCALL_DELETE_CHECKPOINT;
 }
 
 static t_cola_bloqueo *cola_segun_motivo(t_motivo_desalojo motivo)
 {
     switch (motivo)
     {
-    case PAGE_FAULT:         return cola_page_fault;
-    case SYSCALL_LOAD_BATCH: return servicio_loader;
-    case SYSCALL_LABEL:      return servicio_labeler;
-    case SYSCALL_REPORT:     return servicio_logger;
-    default:                 return NULL;
+    case PAGE_FAULT:
+        return cola_page_fault;
+    case SYSCALL_LOAD_BATCH:
+        return servicio_loader;
+    case SYSCALL_LABEL:
+        return servicio_labeler;
+    case SYSCALL_REPORT:
+        return servicio_logger;
+    case SYSCALL_SAVE_CHECKPOINT:
+        return checkpoint_save;
+    case SYSCALL_LOAD_CHECKPOINT:
+        return checkpoint_load;
+    case SYSCALL_DELETE_CHECKPOINT:
+        return checkpoint_delete;
+    default:
+        return NULL;
     }
 }
 
@@ -154,8 +186,10 @@ void bloquear_job(t_job *job, t_motivo_desalojo motivo, t_list *valores)
         return;
     }
 
-    if (motivo != PAGE_FAULT)
-        log_info(logger, "## (%u) - Solicitó syscall: %s", job->jid, motivo_de_desalojo_a_string(motivo));
+    if (motivo == PAGE_FAULT)
+        job->cant_page_faults++;
+    else
+        registrar_syscall(job->jid, motivo_de_desalojo_a_string(motivo));
 
     // Termino su rafaga de CPU: se recalcula la estimacion (HRRN)
     actualizar_estimacion_prox_rafaga(job);
@@ -188,27 +222,38 @@ static void *hilo_cola_bloqueo(void *arg)
         if (cola->es_servicio)
             log_info(logger, "## (%u) inicia %s", job->jid, cola->nombre);
 
-        bool ok = cola->atender(cola->socket_placa, peticion);
+        bool ok = cola->atender(cola->socket_placa, cola->socket_storage, peticion);
 
         // Las syscalls de memoria llegan con paginas lockeadas por el Core:
         // el enunciado pide deslockearlas ANTES de pasar a READY
-        if (cola->es_servicio)
-            placa_deslockear_paginas(cola->socket_placa, job->jid);
 
-        if (ok)
+        // DELETE no necesita deslockear páginas, porque no recibe direcciones de memoria.
+
+        if (cola->es_servicio || cola->es_checkpoint)
         {
-            if (cola->es_servicio)
-                log_info(logger, "## (%u) finalizó %s y pasa a READY", job->jid, cola->nombre);
+            if (strcmp(cola->nombre, "CHECKPOINT_DELETE") != 0)
+            {
+                placa_deslockear_paginas(cola->socket_placa, job->jid);
+            }
         }
-        else
+
+        if (!ok)
         {
-            // El enunciado no define que pasa si falla un servicio (las pruebas no tienen errores).
-            // Por ahora lo logueamos y el Job sigue; finalizarlo seria una decision a charlar en grupo.
-            log_error(logger, "## (%u) - Fallo la atencion de %s", job->jid, cola->nombre);
+            log_error(logger, "(%u) - Fallo la atencion de %s, se finaliza el Job", job->jid, cola->nombre);
+            destruir_peticion(peticion);
+            finalizar_job(job, "ERROR", SIN_CORE);
+            continue;
+        }
+
+        if (cola->es_servicio)
+            log_info(logger, "##(%u) finalizó %s y pasa a READY", job->jid, cola->nombre);
+
+        if (cola->es_checkpoint) // No lo junte con el otro, porque el otro es un log obligatorio para servicios
+        {
+            log_info(logger, "Checkpoint %s finalizado - Job %u pasa a READY", cola->nombre, job->jid);
         }
 
         pasar_a_ready(job);
-
         destruir_peticion(peticion);
     }
     return NULL;
@@ -216,12 +261,12 @@ static void *hilo_cola_bloqueo(void *arg)
 
 // ---------------- ATENCIONES ----------------
 
-static bool atender_page_fault(int socket_placa, t_peticion_bloqueo *peticion)
+static bool atender_page_fault(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
 {
     return placa_cargar_pagina(socket_placa, peticion->job->jid, peticion->nro_pagina);
 }
 
-static bool atender_loader(int socket_placa, t_peticion_bloqueo *peticion)
+static bool atender_loader(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
 {
     uint32_t jid = peticion->job->jid;
 
@@ -259,7 +304,7 @@ static bool atender_loader(int socket_placa, t_peticion_bloqueo *peticion)
     return ok;
 }
 
-static bool atender_labeler(int socket_placa, t_peticion_bloqueo *peticion)
+static bool atender_labeler(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
 {
     uint32_t jid = peticion->job->jid;
     uint32_t cantidad = peticion->tamanio;
@@ -302,7 +347,7 @@ static bool atender_labeler(int socket_placa, t_peticion_bloqueo *peticion)
     return ok;
 }
 
-static bool atender_logger(int socket_placa, t_peticion_bloqueo *peticion)
+static bool atender_logger(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
 {
     uint32_t jid = peticion->job->jid;
     unsigned char *buffer = malloc(peticion->tamanio);
@@ -325,6 +370,62 @@ static bool atender_logger(int socket_placa, t_peticion_bloqueo *peticion)
     return true;
 }
 
+static bool atender_checkpoint_save(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
+{
+    void *contenido = malloc(peticion->tamanio);
+
+    if (contenido == NULL)
+    {
+        log_error(logger, "Error al reservar memoria para el checkpoint '%s' - JID: %u", peticion->nombre_archivo, peticion->job->jid);
+        return false;
+    }
+
+    bool respuesta_lectura = placa_leer_memoria_job(socket_placa, peticion->job->jid, peticion->direcciones, contenido);
+
+    if (!respuesta_lectura)
+    {
+        log_error(logger, "Error al leer la memoria del Job %u desde Placa para guardar el checkpoint '%s'",
+                  peticion->job->jid, peticion->nombre_archivo);
+
+        free(contenido);
+        return false;
+    }
+
+    int respuesta_check = solicitud_guardar_checkpoint_storage(socket_storage, peticion->nombre_archivo, contenido, peticion->tamanio);
+
+    free(contenido);
+
+    return respuesta_check;
+}
+
+static bool atender_checkpoint_load(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
+{
+    void *contenido_respuesta = solicitud_recuperar_checkpoint_storage(socket_storage, peticion->nombre_archivo, peticion->tamanio);
+
+    if (contenido_respuesta == NULL)
+    {
+
+        log_error(logger, "Error al recuperar el checkpoint '%s' desde Storage - JID: %u", peticion->nombre_archivo, peticion->job->jid);
+        return false;
+    }
+
+    bool respuesta = placa_escribir_memoria_job(socket_placa, peticion->job->jid, peticion->direcciones, contenido_respuesta);
+    free(contenido_respuesta);
+
+    if (!respuesta)
+    {
+        log_error(logger, "Error al escribir el checkpoint '%s' en la memoria de Placa - JID: %u", peticion->nombre_archivo, peticion->job->jid);
+    }else{
+        log_info(logger, "Checkpoint '%s' cargado correctamente en Placa - JID: %u - Tamaño: %u bytes", peticion->nombre_archivo, peticion->job->jid, peticion->tamanio);
+    }
+
+    return respuesta;
+}
+
+static bool atender_checkpoint_delete(int socket_placa, int socket_storage, t_peticion_bloqueo *peticion)
+{
+    return solicitud_eliminacion_checkpoint_storage(socket_storage, peticion->nombre_archivo);
+}
 // ---------------- DESCONEXION DE CORE ----------------
 
 void deslockear_paginas_de_job(uint32_t jid)

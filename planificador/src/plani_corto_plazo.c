@@ -59,13 +59,16 @@ void despachar_proceso()
 
     core_elegido->libre = false;
     core_elegido->jid_actual = job_elegido->jid;
+    core_elegido->nro_despacho++;
+    uint32_t id_core = core_elegido->id_core;
+    uint32_t nro_despacho = core_elegido->nro_despacho;
     pthread_mutex_unlock(&mutex_lista_core);
 
     enviar_contexto(core_elegido->socket_dispatch, DESPACHAR_JOB, job_elegido->jid, job_elegido->contexto);
 
     if (strcmp(algoritmo_planificacion, "RR") == 0)
     {
-        iniciar_quantum(job_elegido, core_elegido);
+        iniciar_quantum(job_elegido->jid, id_core, nro_despacho);
     }
 }
 
@@ -74,32 +77,36 @@ void *controlar_quantum(void *arg)
     t_args_quantum *datos = (t_args_quantum *)arg;
     usleep(datos->quantum * 1000);
 
+    // Solo interrumpo si el Core sigue en LA MISMA rafaga que inicio este timer.
+    // Comparar solo el jid no alcanza: el Job pudo bloquearse y volver al mismo Core.
     pthread_mutex_lock(&mutex_lista_core);
-    bool sigue_el_mismo = (datos->core->jid_actual == datos->jid) && !datos->core->libre;
+    t_core *core = buscar_core_por_id(lista_cores, datos->id_core);
+    bool sigue_la_misma_rafaga = core != NULL && !core->libre &&
+                                 core->jid_actual == datos->jid &&
+                                 core->nro_despacho == datos->nro_despacho;
+    int socket_interrupt = core != NULL ? core->socket_interrupt : -1;
     pthread_mutex_unlock(&mutex_lista_core);
 
-    if (!sigue_el_mismo)
+    if (sigue_la_misma_rafaga)
     {
-        free(datos);
-        return NULL;
+        t_motivo_desalojo motivo = FIN_QUANTUM;
+        t_paquete *paquete = crear_paquete(INTERRUPCION);
+        agregar_a_paquete(paquete, &datos->jid, sizeof(u_int32_t));
+        agregar_a_paquete(paquete, &motivo, sizeof(motivo));
+        enviar_paquete(paquete, socket_interrupt);
+        eliminar_paquete(paquete);
     }
-
-    t_motivo_desalojo motivo = FIN_QUANTUM;
-    t_paquete *paquete = crear_paquete(INTERRUPCION);
-    agregar_a_paquete(paquete, &datos->jid, sizeof(u_int32_t));
-    agregar_a_paquete(paquete, &motivo, sizeof(motivo));
-    enviar_paquete(paquete, datos->core->socket_interrupt);
-    eliminar_paquete(paquete);
 
     free(datos);
     return NULL;
 }
 
-void iniciar_quantum(t_job *job_elegido, t_core *core_elegido)
+void iniciar_quantum(uint32_t jid, uint32_t id_core, uint32_t nro_despacho)
 {
     t_args_quantum *datos = malloc(sizeof(t_args_quantum));
-    datos->core = core_elegido;
-    datos->jid = job_elegido->jid;
+    datos->id_core = id_core;
+    datos->nro_despacho = nro_despacho;
+    datos->jid = jid;
     datos->quantum = rr_quantum;
 
     pthread_t hilo_quantum;

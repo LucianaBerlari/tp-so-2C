@@ -143,7 +143,7 @@ void *atender_cliente(void *arg)
 
         case PEDIR_TAM_PAGINA:
         {
-            //agrego esto para probar alloc
+            // agrego esto para probar alloc
             int size;
             recv(socket_cliente, &size, sizeof(int), MSG_WAITALL);
 
@@ -213,6 +213,7 @@ void *atender_cliente(void *arg)
             if (entrada != NULL)
             {
                 marco = cargar_pagina_a_ram(jid, entrada);
+                
             }
 
             uint32_t respuesta_marco = (marco >= 0) ? (uint32_t)marco : 0;
@@ -221,6 +222,7 @@ void *atender_cliente(void *arg)
             enviar_paquete(paquete, socket_cliente);
             eliminar_paquete(paquete);
 
+            
             list_destroy_and_destroy_elements(lista, free);
             break;
         }
@@ -235,7 +237,7 @@ void *atender_cliente(void *arg)
             void *buffer_lectura = malloc(tamanio);
             leer_de_memoria_fisica(dir_fisica, tamanio, buffer_lectura);
 
-            log_info(logger, "## JID: %u - Lectura Física - Dir: %u - Tamaño: %u", jid, dir_fisica, tamanio);
+            log_info(logger, "## JID: %u - Lectura Física - Dir. Física: %u - Tamaño: %u", jid, dir_fisica, tamanio);
 
             t_paquete *paquete = crear_paquete(RESPUESTA_LECTURA);
             agregar_a_paquete(paquete, buffer_lectura, tamanio);
@@ -257,7 +259,7 @@ void *atender_cliente(void *arg)
 
             escribir_en_memoria_fisica(jid, dir_fisica, tamanio, contenido);
 
-            log_info(logger, "## JID: %u - Escritura Física - Dir: %u - Tamaño: %u", jid, dir_fisica, tamanio);
+            log_info(logger, "## JID: %u - Escritura Física - Dir. Física: %u - Tamaño: %u", jid, dir_fisica, tamanio);
 
             t_paquete *paquete = crear_paquete(RESPUESTA_ESCRITURA);
             enviar_paquete(paquete, socket_cliente);
@@ -296,27 +298,27 @@ void *atender_cliente(void *arg)
             t_job *job = dictionary_get(diccionario_jobs, clave);
             free(clave);
 
-            uint32_t dir_logica = UINT32_MAX; // Nio lo incializo con 0 porque puede ser una direccion logica válida y no sirve para detectar error
+            uint32_t dir_logica = UINT32_MAX; // No lo incializo con 0 porque puede ser una direccion logica válida y no sirve para detectar error
             if (job != NULL)
             {
                 dir_logica = asignar_espacio_job(job, tamanio);
             }
             pthread_mutex_unlock(&mutex_jobs);
 
-            char *mensaje_rta = "ERROR EN JOB";
+            char *mensaje_rta = NULL;
             t_paquete *paquete = crear_paquete(RESPUESTA_SOLICITUD);
             agregar_a_paquete(paquete, &id_solicitud, sizeof(id_solicitud));
 
             if (dir_logica == UINT32_MAX) // No hay espacio en offload
             {
-                mensaje_rta = "ASIGNAR_ESPACIO_ERROR";
+                mensaje_rta = "ASIGNAR_ESPACIO_ERROR"; // no hay espacio suficiente
                 agregar_a_paquete(paquete, mensaje_rta, strlen(mensaje_rta) + 1);
             }
             else
             {
                 mensaje_rta = "ASIGNAR_ESPACIO_OK";
                 agregar_a_paquete(paquete, mensaje_rta, strlen(mensaje_rta));
-                agregar_a_paquete(paquete, &dir_logica, sizeof(uint32_t) + 1);
+                agregar_a_paquete(paquete, &dir_logica, sizeof(uint32_t));
             }
 
             enviar_paquete(paquete, socket_cliente);

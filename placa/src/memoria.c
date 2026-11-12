@@ -220,7 +220,9 @@ void leer_de_memoria_fisica(uint32_t dir_fisica, uint32_t tamanio, void *buffer_
 
 void escribir_en_memoria_fisica(uint32_t jid, uint32_t dir_fisica, uint32_t tamanio, void *datos)
 {
+    log_debug(logger, "INtentanto escreibir en memoria");
     usleep(config_valores.retardo_memoria * 1000);
+
     pthread_mutex_lock(&mutex_memoria);
     memcpy(memoria_fisica + dir_fisica, datos, tamanio);
 
@@ -241,6 +243,7 @@ void escribir_en_memoria_fisica(uint32_t jid, uint32_t dir_fisica, uint32_t tama
         }
     }
     pthread_mutex_unlock(&mutex_memoria);
+
 }
 
 // Consulta de páginas

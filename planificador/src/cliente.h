@@ -6,8 +6,7 @@
 #include <commons/config.h>
 #include <utils/conexion.h>
 
-extern int socket_placa;
-extern int socket_storage;
+
 
 void iniciar_conexiones(t_config* config);
 void iniciar_hilo_escucha(void);

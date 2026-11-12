@@ -6,20 +6,23 @@
 #include <utils/protocolo.h>
 #include <stdint.h>
 
-extern t_log* logger;
-extern t_config* config;
+extern t_log *logger;
+extern t_config *config;
 // extern int hay_interrupcion;
 
-typedef enum {
+typedef enum
+{
     EJECUCION_CONTINUA,
     EJECUCION_FINALIZADA,
     EJECUCION_DESALOJADA,
     EJECUCION_PAGE_FAULT,
     EJECUCION_BLOQUEADA,
-    EJECUCION_ERROR
+    EJECUCION_ERROR,
+    EJECUCION_ALLOC_SIN_ESPACIO,
 } t_resultado_ejecucion;
 
-typedef struct {
+typedef struct
+{
     char *nombre;
     char **parametros;
     int cantidad_parametros;
@@ -34,8 +37,6 @@ t_resultado_ejecucion ejecutar_instruccion(
     t_instruccion *instruccion,
     uint32_t jid,
     int socket_placa,
-    int socket_dispatch
-);
-
+    int socket_dispatch);
 
 #endif

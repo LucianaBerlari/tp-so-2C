@@ -18,6 +18,10 @@
 
 #include "util.h"
 
+// SOCKETS 
+int socket_placa;
+int socket_storage;
+
 // VARIABLES DE CONFIGURACION
 
 t_log *logger;

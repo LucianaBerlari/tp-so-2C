@@ -25,6 +25,9 @@ t_job *crear_job()
     job->contexto = malloc(sizeof(t_registros));
     memset(job->contexto, 0, sizeof(t_registros)); // todos los registros arrancan en 0
 
+    job->cant_page_faults = 0;
+    job->cant_syscalls = 0;
+    
     pthread_mutex_lock(&mutex_lista_jobs);
     list_add(lista_jobs, job);
     pthread_mutex_unlock(&mutex_lista_jobs);

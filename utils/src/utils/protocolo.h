@@ -6,53 +6,62 @@ typedef enum
 {
     // ACA IRIA LAS OPERACIONES QUE SE ENVIAN ENTRE MODULOS
     MENSAJE,
-	PAQUETE,
+    PAQUETE,
     CONEXION, //  Agregue este para que el op_code del paquete se este y la info que agregamos es el t_modulo correspondinete
-    ENVIO_ID, 
+    ENVIO_ID,
     ENVIO_TIPO_CONEXION,
     RESPUESTA_SOLICITUD,
 
     // Operaciones check N2
 
     // PLANI <--> PLACA
-    CREAR_JOB, //planificador crea job y se lo manda a la placa
+    CREAR_JOB, // planificador crea job y se lo manda a la placa
     INIT_JOB,
-    ASIGNAR_ESPACIO, //alloc [jid,tamanio] -> responde una direccion logica
-    LIBERAR_ESPACIO, //Liberamos [jid, dir_logica]
-    CARGAR_PAGINA, //[jid, nro_pagina]
+    ASIGNAR_ESPACIO, // alloc [jid,tamanio] -> responde una direccion logica
+    LIBERAR_ESPACIO, // Liberamos [jid, dir_logica]
+    CARGAR_PAGINA,   //[jid, nro_pagina]
 
     // PLANI <--> CORE
-    //DEVOLVER_CONTEXTO,
+    // DEVOLVER_CONTEXTO,
     DESPACHAR_JOB, // planificador despacha el job al core
-    DESALOJAR_JOB,  // Fin de quantum / interrupcion 
-    INTERRUPCION, // Planificador le envia al core
+    DESALOJAR_JOB, // Fin de quantum / interrupcion
+    INTERRUPCION,  // Planificador le envia al core
     FINALIZAR_JOB, // core le envia al planificador y el planificador a placa+
-
+    FINALIZAR_JOB_SIN_ESPACIO,
     // CORE <--> PLACA
-    FETCH_INSTRUCCION, // Core le pide la instruccion a la placa
+    FETCH_INSTRUCCION,     // Core le pide la instruccion a la placa
     RESPUESTA_INSTRUCCION, // placa responde al core
     RESPUESTA_SYSCALL,
 
     // core <-> placa (MMU)
-    PEDIR_TAM_PAGINA, //Core->placa: El core no tiene TAM_PAGINA en su config
+    PEDIR_TAM_PAGINA,     // Core->placa: El core no tiene TAM_PAGINA en su config
     RESPUESTA_TAM_PAGINA, // Placa le responde al core, el tamaño de pagina
-    OBTENER_MARCO, //el core le solicita a la placa [Jid: nro_pagina]
-    RESPUESTA_MARCO, // placa le responde al core [marco] 
-    RESPUESTA_PAGE_FAULT, //placa le responde al core: La pagina no esta en memoria
-
+    OBTENER_MARCO,        // el core le solicita a la placa [Jid: nro_pagina]
+    RESPUESTA_MARCO,      // placa le responde al core [marco]
+    RESPUESTA_PAGE_FAULT, // placa le responde al core: La pagina no esta en memoria
 
     // Core <-> planificador
-    LEER_MEMORIA, // [Jid, dir__fisica, tamanio]
-    RESPUESTA_LECTURA, // Placa --> contenido
-    ESCRIBIR_MEMORIA, //[Jid, dir_fisica, Tamanio_contenido]
-    RESPUESTA_ESCRITURA, //Placa responde que esta todo ok
-    DESLOCKEAR_PAGINAS, // [Jid]
-      // Syscalls 
-    SYSCALL_ALLOC, //[jid, tamanio]  respuesta a la syscall con la dir logica
-    SYSCALL_FREE, // [jid, direccion logica] respuesta a la syscall
-
+    LEER_MEMORIA,        // [Jid, dir__fisica, tamanio]
+    RESPUESTA_LECTURA,   // Placa --> contenido
+    ESCRIBIR_MEMORIA,    //[Jid, dir_fisica, Tamanio_contenido]
+    RESPUESTA_ESCRITURA, // Placa responde que esta todo ok
+    DESLOCKEAR_PAGINAS,  // [Jid]
+    RESPUESTA_ALLOC_OK,
+    RESPUESTA_ALLOC_ERROR,
+    RESPUESTA_FREE_OK,
+    RESPUESTA_FREE_ERROR,
     
-  
+    // Syscalls
+    SYSCALL_ALLOC, //[jid, tamanio]  respuesta a la syscall con la dir logica
+    SYSCALL_FREE,  // [jid, direccion logica] respuesta a la syscall
+
+
+        // Check 4: Checkpoints (PLANI <--> STORAGE)
+    GUARDAR_CHECKPOINT,   // plani -> storage: [nombre][contenido]
+    CARGAR_CHECKPOINT,    // plani -> storage: [nombre]
+    ELIMINAR_CHECKPOINT,  // plani -> storage: [nombre]
+    RESPUESTA_CHECKPOINT, // storage -> plani: [resultado] (+ [contenido] en cargar)
+
 } op_code;
 
 typedef enum
@@ -60,31 +69,39 @@ typedef enum
     FIN_QUANTUM,
     SYSCALL_BLOQUEANTE,
     PAGE_FAULT, // Block para pedir a la placa la pagina, luego de eso ready
-    SYSCALL_LOAD_BATCH, 
+    SYSCALL_LOAD_BATCH,
     SYSCALL_LABEL,
     SYSCALL_REPORT,
+    SYSCALL_SAVE_CHECKPOINT, //Nuevos motivos de desalojo CHECK 4
+    SYSCALL_LOAD_CHECKPOINT, 
+    SYSCALL_DELETE_CHECKPOINT,
     // Usamos un motivo por servicio, asi el switch de desalojar job, sabe a que cola mandar el job
 } t_motivo_desalojo;
 
-
+typedef enum
+{
+    FINALIZACION_NORMAL,
+    SIN_ESPACIO_OFFLOAD,
+    SIN_ESPACIO_STORAGE,
+    CHECKPOINT_INEXISTENTE
+} t_motivo_finalizacion;
 
 typedef enum
 {
-    CONEXION_DISPATCH, // Conexión para recibir las instruccciones a ejecutar 
+    CONEXION_DISPATCH, // Conexión para recibir las instruccciones a ejecutar
     CONEXION_INTERRUPT // Conexión para recibir las interrupciones
 } t_tipo_conexion_core;
-
 
 typedef enum
 {
     PLANIFICADOR,
     CORE,
     PLACA,
-	STORAGE,
+    STORAGE,
 } t_modulo;
 
-//Estructura de registros del core exigidos  
-typedef struct 
+// Estructura de registros del core exigidos
+typedef struct
 {
     uint32_t PC;
     uint32_t AX;
@@ -107,7 +124,5 @@ typedef struct
     uint32_t direccion_fisica;
     uint32_t tamanio;
 } t_direccion_fisica;
-
-
 
 #endif

@@ -87,6 +87,7 @@ void *atender_core(void *arg)
 
         core->id_core = id_core;
         core->jid_actual = -1;
+        core->nro_despacho = 0;
         core->libre = false;
         core->socket_dispatch = -1;
         core->socket_interrupt = -1;
@@ -172,7 +173,7 @@ void *atender_core(void *arg)
             break;
         }
 
-                case DESALOJAR_JOB:
+        case DESALOJAR_JOB:
         {
             // [jid][registros][motivo] + datos extra segun el motivo
             t_list *valores = recibir_paquete(core->socket_dispatch);
@@ -224,7 +225,6 @@ void *atender_core(void *arg)
 
             break;
         }
-           
 
         case FINALIZAR_JOB:
         {
@@ -257,7 +257,24 @@ void *atender_core(void *arg)
             t_job *job_encontrado = buscar_job_por_jid(lista_jobs, jid);
             pthread_mutex_unlock(&mutex_lista_jobs);
 
+            registrar_syscall(jid, "EXIT");
             finalizar_job(job_encontrado, "EXIT", id_core);
+
+            break;
+        }
+        case FINALIZAR_JOB_SIN_ESPACIO:
+        {
+            u_int32_t jid;
+            t_registros registros;
+
+            recibir_contexto(core->socket_dispatch, &jid, &registros);
+            actualizar_contexto(jid, &registros);
+
+            pthread_mutex_lock(&mutex_lista_jobs);
+            t_job *job_encontrado = buscar_job_por_jid(lista_jobs, jid);
+            pthread_mutex_unlock(&mutex_lista_jobs);
+
+            finalizar_job(job_encontrado, "SIN ESPACION OFFLOAD", id_core);
 
             break;
         }
@@ -265,10 +282,10 @@ void *atender_core(void *arg)
         case INIT_JOB:
         {
             t_list *paquete = recibir_paquete(core->socket_dispatch);
-            u_int32_t pid = *(u_int32_t *)list_get(paquete, 0); // sirve  para las estadisticas
+            u_int32_t jid = *(u_int32_t *)list_get(paquete, 0); // sirve  para las estadisticas
             char *path_job_nuevo = list_get(paquete, 1);
 
-            log_info(logger, "## (%u) - Solicitó syscall: INIT_JOB", pid);
+            registrar_syscall(jid, "INIT_JOB");
 
             t_job *job_nuevo = crear_job();
             u_int32_t jid_nuevo = job_nuevo->jid; // lo guardo antes: si falla, el job se libera
@@ -300,7 +317,89 @@ void *atender_core(void *arg)
             eliminar_paquete(respuesta);
             break;
         }
+        case SYSCALL_ALLOC:
+        {
+            t_list *paquete = recibir_paquete(core->socket_dispatch);
+            u_int32_t jid = *(u_int32_t *)list_get(paquete, 0);
+            u_int32_t tamanio = *(u_int32_t *)list_get(paquete, 1);
 
+             registrar_syscall(jid, "ALLOC");
+
+            // Creo la solicitud
+            t_solicitud_pendiente *peticion = crear_solicitud_pendiente(jid, ASIGNAR_ESPACIO);
+
+            // Le solicito a placa asignar espacio
+            t_paquete *paquete_placa = crear_paquete(ASIGNAR_ESPACIO);
+            agregar_a_paquete(paquete_placa, &jid, sizeof(uint32_t));
+            agregar_a_paquete(paquete_placa, &tamanio, sizeof(uint32_t));
+            agregar_a_paquete(paquete_placa, &peticion->id_solicitd, sizeof(uint32_t));
+            enviar_paquete(paquete_placa, socket_placa);
+            eliminar_paquete(paquete_placa);
+
+            // Espero la respuesta
+            sem_wait(&peticion->sem_respuesta);
+
+            // Envio la respuesta a CORE segun haya sido la de PLACA
+            t_paquete *paquete_respuesta_core;
+            if (peticion->exito)
+            {
+                uint32_t direccion_logica = *(uint32_t *)peticion->respuesta;
+                paquete_respuesta_core = crear_paquete(RESPUESTA_ALLOC_OK);
+                agregar_a_paquete(paquete_respuesta_core, &direccion_logica, sizeof(uint32_t));
+                log_info(logger, "JID: %u - ALLOC exitoso - Dirección lógica: %u", jid, direccion_logica);
+            }
+            else
+            {
+                paquete_respuesta_core = crear_paquete(RESPUESTA_ALLOC_ERROR);
+                log_error(logger, "JID: %u - Placa informó que no hay espacio suficiente en Offload para realizar la asignación.", jid);
+            }
+
+            enviar_paquete(paquete_respuesta_core, socket_core);
+            eliminar_paquete(paquete_respuesta_core);
+            eliminar_solicitud_pendiente(peticion);
+            list_destroy_and_destroy_elements(paquete, free);
+            break;
+        }
+        case SYSCALL_FREE:
+        {
+            t_list *paquete = recibir_paquete(core->socket_dispatch);
+            u_int32_t jid = *(u_int32_t *)list_get(paquete, 0);
+            u_int32_t direccion_logica = *(u_int32_t *)list_get(paquete, 1);
+
+            registrar_syscall(jid, "FREE");
+            // Creo la solicitud
+            t_solicitud_pendiente *peticion = crear_solicitud_pendiente(jid, LIBERAR_ESPACIO );
+
+            // Le solicito a placa liberar espacio
+            t_paquete *paquete_placa = crear_paquete(LIBERAR_ESPACIO);
+            agregar_a_paquete(paquete_placa, &jid, sizeof(uint32_t));
+            agregar_a_paquete(paquete_placa, &direccion_logica, sizeof(uint32_t));
+            agregar_a_paquete(paquete_placa, &peticion->id_solicitd, sizeof(uint32_t));
+            enviar_paquete(paquete_placa, socket_placa);
+            eliminar_paquete(paquete_placa);
+
+            // Espero la respuesta
+            sem_wait(&peticion->sem_respuesta);
+
+            // Envio la respuesta a CORE segun haya sido la de PLACA
+            t_paquete *paquete_respuesta_core;
+            if (peticion->exito)
+            {
+                paquete_respuesta_core = crear_paquete(RESPUESTA_FREE_OK);
+                log_info(logger, "JID: %u - Placa confirmo FREE exitoso - Direccion Logica liberada: %u", jid, direccion_logica);
+            }
+            else
+            {
+                paquete_respuesta_core = crear_paquete(RESPUESTA_FREE_ERROR);
+                  log_error(logger,"JID: %u - Placa informo error en FREE - No se pudo liberar la Direccion Logica: %u",jid, direccion_logica);
+            }
+
+            enviar_paquete(paquete_respuesta_core, socket_core);
+            eliminar_paquete(paquete_respuesta_core);
+            eliminar_solicitud_pendiente(peticion);
+            list_destroy_and_destroy_elements(paquete, free);
+            break;
+        }
         default:
             log_warning(logger, "Operación desconocido desde CORE: %d", codigo_operacion);
             close(core->socket_dispatch);

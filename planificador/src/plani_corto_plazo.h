@@ -10,16 +10,14 @@ void *planificador_corto_plazo(void *arg);
 void despachar_proceso();
 
 void *controlar_quantum(void* arg);
-void iniciar_quantum(t_job *job_elegido, t_core *core_elegido);
-
+void iniciar_quantum(uint32_t jid, uint32_t id_core, uint32_t nro_despacho);
 double calcular_response_ratio(t_job *job);
 t_job *mayor_response_ratio();
 
 typedef struct {
     u_int32_t jid;
-    t_core* core;// si el Core se desconecta mientras corre el quantum, este
-                // puntero queda apuntando a memoria liberada. Guardar id_core y
-                // buscarlo con buscar_core_por_id al despertar.
+    u_int32_t id_core;      // se busca al despertar (el Core se puede haber desconectado)
+    u_int32_t nro_despacho; // identifica ESTA rafaga: si el Job se bloqueo y volvio, es otra
     u_int32_t quantum;
 } t_args_quantum;
 

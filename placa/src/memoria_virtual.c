@@ -216,13 +216,21 @@ int cargar_pagina_a_ram(uint32_t jid, t_entrada_pagina *pagina_a_cargar) // Carg
 
         if (victima == NULL)
         {
-            log_error(logger, "## JID: %d - Error: Todas las páginas están lockeadas, no hay víctima posible", jid);
+            log_error(logger, "JID: %d - Error: Todas las páginas están lockeadas, no hay víctima posible", jid);
             return -1;
         }
 
         marco_asignado = victima->marco;
-        log_info(logger, "## Reemplazo: Sale víctima Job %d (Pág: %d, Marco: %d)",
-                 tabla_marcos[marco_asignado].jid, victima->nro_pagina, marco_asignado);
+        log_info(logger,
+                 "## Reemplazo - Marco: %d - JID Víctima: %u - Página Víctima: %u",
+                 marco_asignado,
+                 tabla_marcos[marco_asignado].jid,
+                 victima->nro_pagina);
+
+        log_info(logger, "## Reemplazo - Marco: %d - JID Víctima: %u - Página Víctima: %u",
+                 marco_asignado,
+                 tabla_marcos[marco_asignado].jid,
+                 victima->nro_pagina);
 
         // Si la víctima estaba modificada, se sincroniza con el archivo de Offload
         if (victima->modificado)
@@ -230,6 +238,10 @@ int cargar_pagina_a_ram(uint32_t jid, t_entrada_pagina *pagina_a_cargar) // Carg
             void *origen = memoria_fisica + (marco_asignado * config_valores.tam_pagina);
             escribir_pagina_en_offload(victima->posicion_offload, origen);
             victima->modificado = false;
+            log_info(logger,
+                     "## JID: %u - Bajada al Offload - Página: %u",
+                     tabla_marcos[marco_asignado].jid,
+                     victima->nro_pagina);
         }
 
         // La víctima deja de estar en RAM

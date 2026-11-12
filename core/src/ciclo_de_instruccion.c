@@ -64,7 +64,7 @@ void ciclo_de_instruccion(int socket_dispatch, int socket_placa, uint32_t jid)
             break;
         }
 
-        log_info(logger, "## Instruccion recibida: %s", instruccion);
+        log_info(logger, "## Instrucción recibida: %s", instruccion);
 
         // acá debería ir forward, backward y update
         // TODO
@@ -102,6 +102,16 @@ void ciclo_de_instruccion(int socket_dispatch, int socket_placa, uint32_t jid)
                 jid,
                 &registros_cpu,
                 mmu_get_pagina_page_fault());
+
+            ejecutando = 0;
+            continue;
+        }
+
+        if (resultado == EJECUCION_ALLOC_SIN_ESPACIO)
+        {
+            mmu_deslockear_paginas(socket_placa, jid);
+
+            enviar_contexto(socket_dispatch, FINALIZAR_JOB_SIN_ESPACIO, jid, &registros_cpu);
 
             ejecutando = 0;
             continue;
@@ -504,19 +514,26 @@ t_resultado_ejecucion ejecutar_instruccion(
         uint32_t direccion_salida =
             obtener_valor_operando(instruccion->parametros[2]);
 
-        uint32_t direccion_acumulador =
-            obtener_valor_operando(instruccion->parametros[3]);
+        /*uint32_t direccion_acumulador =
+            obtener_valor_operando(instruccion->parametros[3]);*/
+
+        char *registro_acumulador = instruccion->parametros[3];
+
+        uint32_t acumulador =
+            obtener_valor_registro(registro_acumulador);
+
+        /*const uint32_t direcciones[] = {
+            direccion_pesos,
+            direccion_entrada,
+            direccion_acumulador,
+            direccion_salida};*/
 
         const uint32_t direcciones[] = {
             direccion_pesos,
             direccion_entrada,
-            direccion_acumulador,
             direccion_salida};
-        t_resultado_ejecucion preparacion = preparar_accesos(
-            socket_placa,
-            jid,
-            direcciones,
-            sizeof(direcciones) / sizeof(direcciones[0]));
+
+        t_resultado_ejecucion preparacion = preparar_accesos(socket_placa, jid, direcciones, sizeof(direcciones) / sizeof(direcciones[0]));
         if (preparacion != EJECUCION_CONTINUA)
         {
             mmu_deslockear_paginas(socket_placa, jid);
@@ -525,7 +542,7 @@ t_resultado_ejecucion ejecutar_instruccion(
 
         uint32_t pesos;
         uint32_t entrada;
-        uint32_t acumulador;
+        // uint32_t acumulador;
 
         t_resultado_mmu resultado =
             mmu_leer_uint32(
@@ -565,7 +582,7 @@ t_resultado_ejecucion ejecutar_instruccion(
                        : EJECUCION_ERROR;
         }
 
-        resultado =
+        /*resultado =
             mmu_leer_uint32(
                 socket_placa,
                 jid,
@@ -579,7 +596,7 @@ t_resultado_ejecucion ejecutar_instruccion(
             return resultado == MMU_PAGE_FAULT
                        ? EJECUCION_PAGE_FAULT
                        : EJECUCION_ERROR;
-        }
+        }*/
 
         uint32_t nuevo_acumulador =
             acumulador + pesos * entrada;
@@ -598,6 +615,16 @@ t_resultado_ejecucion ejecutar_instruccion(
             return resultado == MMU_PAGE_FAULT
                        ? EJECUCION_PAGE_FAULT
                        : EJECUCION_ERROR;
+        }
+
+        if (!asignar_valor_registro(
+                registro_acumulador,
+                nuevo_acumulador))
+        {
+            log_error(logger, "Registro acumulador inválido: %s",
+                      registro_acumulador);
+            mmu_deslockear_paginas(socket_placa, jid);
+            return EJECUCION_ERROR;
         }
 
         registros_cpu.E1 = pesos;
@@ -626,14 +653,25 @@ t_resultado_ejecucion ejecutar_instruccion(
         uint32_t direccion_gradientes =
             obtener_valor_operando(instruccion->parametros[2]);
 
-        uint32_t direccion_acumulador =
-            obtener_valor_operando(instruccion->parametros[3]);
+        /*uint32_t direccion_acumulador =
+            obtener_valor_operando(instruccion->parametros[3]);*/
+
+        char *registro_acumulador = instruccion->parametros[3];
+
+        uint32_t acumulador =
+            obtener_valor_registro(registro_acumulador);
+
+        /*const uint32_t direcciones[] = {
+            direccion_pesos,
+            direccion_activaciones,
+            direccion_acumulador,
+            direccion_gradientes};*/
 
         const uint32_t direcciones[] = {
             direccion_pesos,
             direccion_activaciones,
-            direccion_acumulador,
             direccion_gradientes};
+
         t_resultado_ejecucion preparacion = preparar_accesos(
             socket_placa,
             jid,
@@ -647,7 +685,7 @@ t_resultado_ejecucion ejecutar_instruccion(
 
         uint32_t pesos;
         uint32_t activaciones;
-        uint32_t acumulador;
+        // uint32_t acumulador;
 
         t_resultado_mmu resultado =
             mmu_leer_uint32(
@@ -679,7 +717,7 @@ t_resultado_ejecucion ejecutar_instruccion(
                        : EJECUCION_ERROR;
         }
 
-        resultado =
+        /*resultado =
             mmu_leer_uint32(
                 socket_placa,
                 jid,
@@ -692,7 +730,7 @@ t_resultado_ejecucion ejecutar_instruccion(
             return resultado == MMU_PAGE_FAULT
                        ? EJECUCION_PAGE_FAULT
                        : EJECUCION_ERROR;
-        }
+        }*/
 
         uint32_t nuevo_acumulador =
             acumulador - pesos * activaciones;
@@ -710,6 +748,19 @@ t_resultado_ejecucion ejecutar_instruccion(
             return resultado == MMU_PAGE_FAULT
                        ? EJECUCION_PAGE_FAULT
                        : EJECUCION_ERROR;
+        }
+
+        // Actualizar el registro acumulador 
+        if (!asignar_valor_registro(
+                registro_acumulador,
+                nuevo_acumulador))
+        {
+            log_error(logger,
+                      "Registro acumulador inválido: %s",
+                      registro_acumulador);
+
+            mmu_deslockear_paginas(socket_placa, jid);
+            return EJECUCION_ERROR;
         }
 
         registros_cpu.E1 = pesos;
@@ -857,13 +908,14 @@ t_resultado_ejecucion ejecutar_instruccion(
             SYSCALL_REPORT);
     }
 
-    log_error(logger, "Instruccion desconocida o no implementada");
+    log_error(logger, "Instruccion desconocida o no implementada %s", instruccion->nombre);
 
     mmu_deslockear_paginas(socket_placa, jid);
     return EJECUCION_CONTINUA;
 }
 
 static t_resultado_ejecucion ejecutar_syscall_memoria(
+
     t_instruccion *instruccion,
     uint32_t jid,
     int socket_placa,
@@ -954,20 +1006,16 @@ static t_resultado_ejecucion syscall_alloc(
     }
 
     t_paquete *paquete = crear_paquete(SYSCALL_ALLOC);
-
     agregar_a_paquete(paquete, &jid, sizeof(uint32_t));
     agregar_a_paquete(paquete, &tamanio, sizeof(uint32_t));
-    agregar_a_paquete(
-        paquete,
-        registro_destino,
-        strlen(registro_destino) + 1);
+    // agregar_a_paquete(paquete, registro_destino, strlen(registro_destino) + 1); Planificador no la necesita
 
     enviar_paquete(paquete, socket_dispatch);
     eliminar_paquete(paquete);
 
     int codigo = recibir_operacion(socket_dispatch);
 
-    if (codigo != RESPUESTA_SYSCALL)
+    /*if (codigo != RESPUESTA_SYSCALL)
     {
         log_error(
             logger,
@@ -976,34 +1024,40 @@ static t_resultado_ejecucion syscall_alloc(
             codigo);
 
         return EJECUCION_ERROR;
-    }
-
-    t_list *respuesta = recibir_paquete(socket_dispatch);
-
-    if (respuesta == NULL || list_size(respuesta) < 1)
+    }*/
+    if (codigo == RESPUESTA_ALLOC_ERROR)
     {
-        if (respuesta != NULL)
+        log_error(logger, "JID: %u - No hay espacio suficiente: %d", jid, codigo);
+        return EJECUCION_ALLOC_SIN_ESPACIO;
+    }
+    else if (codigo == RESPUESTA_ALLOC_OK)
+    {
+        t_list *respuesta = recibir_paquete(socket_dispatch);
+
+        if (respuesta == NULL || list_size(respuesta) < 1)
+        {
+            if (respuesta != NULL)
+                list_destroy_and_destroy_elements(respuesta, free);
+
+            return EJECUCION_ERROR;
+        }
+
+        uint32_t direccion_logica = *(uint32_t *)list_get(respuesta, 0);
+
+        if (!asignar_valor_registro(registro_destino, direccion_logica))
+        {
+            log_error(logger, "## JID: %u - Registro destino inválido: %s", jid, registro_destino);
             list_destroy_and_destroy_elements(respuesta, free);
-
-        return EJECUCION_ERROR;
-    }
-
-    uint32_t direccion_logica =
-        *(uint32_t *)list_get(respuesta, 0);
-
-    if (!asignar_valor_registro(registro_destino, direccion_logica))
-    {
-        log_error(
-            logger,
-            "## JID: %u - Registro destino inválido: %s",
-            jid,
-            registro_destino);
+            return EJECUCION_ERROR;
+        }
 
         list_destroy_and_destroy_elements(respuesta, free);
+    }
+    else
+    {
+        log_error(logger, "JID: %u - Respuesta inválida para ALLOC: %d", jid, codigo);
         return EJECUCION_ERROR;
     }
-
-    list_destroy_and_destroy_elements(respuesta, free);
 
     return EJECUCION_CONTINUA;
 }
@@ -1031,22 +1085,26 @@ static t_resultado_ejecucion syscall_free(
     eliminar_paquete(paquete);
 
     int codigo = recibir_operacion(socket_dispatch);
-
-    if (codigo != RESPUESTA_SYSCALL)
-    {
-        log_error(
-            logger,
-            "## JID: %u - Respuesta inválida para FREE: %d",
-            jid,
-            codigo);
-
-        return EJECUCION_ERROR;
-    }
-
     t_list *respuesta = recibir_paquete(socket_dispatch);
-
     if (respuesta != NULL)
         list_destroy_and_destroy_elements(respuesta, free);
+
+    if (codigo == RESPUESTA_FREE_OK)
+    {
+        log_info(logger, " JID: %u - FREE exitoso - Dirección lógica liberada: %u", jid, direccion);
+
+        return EJECUCION_CONTINUA;
+    }
+    else if (codigo == RESPUESTA_FREE_ERROR)
+    {
+        log_error(logger, "JID: %u - FREE falló - No se pudo liberar la dirección lógica: %u", jid, direccion);
+        return EJECUCION_ERROR;
+    }
+    else
+    {
+        log_error(logger, "## JID: %u - Respuesta inválida para FREE - Código recibido: %d", jid, codigo);
+        return EJECUCION_ERROR;
+    }
 
     return EJECUCION_CONTINUA;
 }

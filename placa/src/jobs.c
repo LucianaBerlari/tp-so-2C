@@ -52,6 +52,9 @@ void finalizar_job_en_placa(uint32_t jid)
     if (job->tabla_de_paginas != NULL) {
         list_destroy_and_destroy_elements(job->tabla_de_paginas, liberar_entrada_pagina);
     }
+    if (job->asignaciones_de_espacio != NULL) {
+        list_destroy_and_destroy_elements(job->asignaciones_de_espacio, free);
+    }
 
     free(job);
 

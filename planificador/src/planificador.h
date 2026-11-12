@@ -7,6 +7,8 @@
 #include <utils/comunicacion.h>
 #include <semaphore.h>
 
+extern int socket_placa;
+extern int socket_storage;
 
 extern t_log *logger;
 extern t_config *config;
@@ -41,6 +43,10 @@ typedef struct{
     struct timespec tiempo_inicio_ready;
     struct timespec tiempo_inicio_exec;
 
+    // Estadisticas
+    u_int32_t cant_page_faults;
+    u_int32_t cant_syscalls;
+
 }t_job;
 
 typedef struct{
@@ -49,6 +55,7 @@ typedef struct{
     int socket_interrupt;
     bool libre;
     u_int32_t jid_actual;
+    u_int32_t nro_despacho; // se incrementa en cada despacho: identifica la rafaga para el quantum
 }t_core;
 
 void incializar_mutex();

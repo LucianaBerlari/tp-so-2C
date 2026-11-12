@@ -81,10 +81,11 @@ void enviar_mensaje(char *mensaje, int socket_cliente)
 void *recibir_buffer(int *size, int socket_cliente)
 {
 	void *buffer;
-
-	recv(socket_cliente, size, sizeof(int), MSG_WAITALL);
-	buffer = malloc(*size);
-	recv(socket_cliente, buffer, *size, MSG_WAITALL);
+	if (recv(socket_cliente, size, sizeof(int), MSG_WAITALL) <= 0)
+    *size = 0;
+	buffer = malloc(*size > 0 ? *size : 1);
+	if (*size > 0)
+    recv(socket_cliente, buffer, *size, MSG_WAITALL);
 
 	return buffer;
 }
