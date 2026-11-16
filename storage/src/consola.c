@@ -45,8 +45,7 @@ static void comando_write(char**partes){
       printf("Contenido invalido: tiene que ser hexadecimal, de a pares, hasta 20 bytes\n");
         return;
     }
-    if(guardar_checkpoint(partes[1],bytes,tamanio))
-     printf("Checkpoint %s guardado (%u bytes)\n", partes[1], tamanio);
+    if(guardar_checkpoint(partes[1],bytes,tamanio) == GUARDAR_OK)     printf("Checkpoint %s guardado (%u bytes)\n", partes[1], tamanio);
     else
         printf("No se pudo guardar %s (ver el log)\n", partes[1]);
 

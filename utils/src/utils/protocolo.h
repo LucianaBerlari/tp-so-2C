@@ -50,7 +50,7 @@ typedef enum
     RESPUESTA_ALLOC_ERROR,
     RESPUESTA_FREE_OK,
     RESPUESTA_FREE_ERROR,
-    
+
     // Syscalls
     SYSCALL_ALLOC, //[jid, tamanio]  respuesta a la syscall con la dir logica
     SYSCALL_FREE,  // [jid, direccion logica] respuesta a la syscall
@@ -60,8 +60,9 @@ typedef enum
     GUARDAR_CHECKPOINT,   // plani -> storage: [nombre][contenido]
     CARGAR_CHECKPOINT,    // plani -> storage: [nombre]
     ELIMINAR_CHECKPOINT,  // plani -> storage: [nombre]
-    RESPUESTA_CHECKPOINT, // storage -> plani: [resultado] (+ [contenido] en cargar)
-
+    RESPUESTA_CHECKPOINT_OK, // storage -> plani: [resultado] (+ [contenido] en cargar)
+    RESPUESTA_CHECKPOINT_SIN_ESPACIO,
+    RESPUESTA_CHECKPOINT_INEXISTENTE,
 } op_code;
 
 typedef enum
@@ -72,8 +73,8 @@ typedef enum
     SYSCALL_LOAD_BATCH,
     SYSCALL_LABEL,
     SYSCALL_REPORT,
-    SYSCALL_SAVE_CHECKPOINT, //Nuevos motivos de desalojo CHECK 4
-    SYSCALL_LOAD_CHECKPOINT, 
+    SYSCALL_SAVE_CHECKPOINT, // Nuevos motivos de desalojo CHECK 4
+    SYSCALL_LOAD_CHECKPOINT,
     SYSCALL_DELETE_CHECKPOINT,
     // Usamos un motivo por servicio, asi el switch de desalojar job, sabe a que cola mandar el job
 } t_motivo_desalojo;

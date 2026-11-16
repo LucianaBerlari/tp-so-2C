@@ -54,11 +54,11 @@ static t_cola_bloqueo *crear_cola_bloqueo(char *nombre, bool es_servicio, bool e
     sem_init(&cola->sem_pendientes, 0, 0);
     cola->socket_placa = conectar_placa_dedicada(nombre);
 
-    cola->socket_storage=-1;
+    cola->socket_storage = -1;
     if (es_checkpoint)
     {
         cola->socket_storage = conectar_storage_dedicada(nombre);
-    } 
+    }
     cola->atender = atender;
 
     pthread_t hilo;
@@ -147,6 +147,30 @@ static t_peticion_bloqueo *parsear_peticion(t_job *job, t_motivo_desalojo motivo
             return NULL;
         }
         peticion->nro_pagina = *(uint32_t *)list_get(valores, 3);
+        return peticion;
+    }
+
+    if (motivo == SYSCALL_DELETE_CHECKPOINT)
+    {
+        if (list_size(valores) < 4)
+        {
+            log_error(logger,"(%u) - DELETE_CHECKPOINT sin nombre de checkpoint", job->jid);
+
+            free(peticion);
+            return NULL;
+        }
+
+        char *nombre = list_get(valores, 3);
+
+        if (nombre == NULL || strlen(nombre) == 0)
+        {
+            log_error(logger, "(%u) - DELETE_CHECKPOINT con nombre invalido", job->jid);
+            free(peticion);
+            return NULL;
+        }
+
+        peticion->nombre_archivo = strdup(nombre);
+
         return peticion;
     }
 
@@ -415,7 +439,9 @@ static bool atender_checkpoint_load(int socket_placa, int socket_storage, t_peti
     if (!respuesta)
     {
         log_error(logger, "Error al escribir el checkpoint '%s' en la memoria de Placa - JID: %u", peticion->nombre_archivo, peticion->job->jid);
-    }else{
+    }
+    else
+    {
         log_info(logger, "Checkpoint '%s' cargado correctamente en Placa - JID: %u - Tamaño: %u bytes", peticion->nombre_archivo, peticion->job->jid, peticion->tamanio);
     }
 

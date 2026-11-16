@@ -8,6 +8,10 @@
 #include <utils/comunicacion.h>
 #include <utils/util.h>
 
+<<<<<<< HEAD
+#include <utils/protocolo.h>
+#include "filesystem.h"
+
 /*int iniciar_servidor_storage(void){
     int socket_servidor;
     struct addrinfo  hints, *servinfo;
@@ -72,6 +76,8 @@ void esperar_cliente_storage (int server_fd){
 
     }
 }*/
+=======
+>>>>>>> e0bfbc2 (Correcion de errores)
 
 void esperar_cliente_storage(int server_fd)
 {
@@ -91,6 +97,12 @@ void esperar_cliente_storage(int server_fd)
         pthread_create(&hilo_cliente, NULL, atender_cliente_storage, socket_cliente); // crear y arrancar el hilo en 2do plano
         pthread_detach(hilo_cliente);                                                 // cuando este hilo termine de atendere al cliente hacer return y liberar memoria
     }
+}
+
+// Responde con un opcode, el planificador solo lee 4 bytes con recibir_operacion
+static void responder_codigo(int socket, int codigo)
+{
+    send(socket, &codigo, sizeof(int), 0);
 }
 
 // atencion a los clientes conectados
@@ -146,6 +158,64 @@ void *atender_cliente_storage(void *arg)
             enviar_mensaje("CONFIRMACION_RECIBIDA", socket_cliente);
             break;
             }
+
+            case GUARDAR_CHECKPOINT:        
+            {
+            t_list *campos = recibir_paquete(socket_cliente);
+            char *nombre = list_get(campos, 0);
+            void *contenido = list_get(campos, 1);
+            uint32_t tamanio = *(uint32_t *)list_get(campos, 2);
+            log_info(logger, "## Solicitud Guardar Checkpoint: %s", nombre);
+            t_resultado_guardado resultado = guardar_checkpoint(nombre, contenido, tamanio);
+
+                if (resultado == GUARDAR_OK)
+                    responder_codigo(socket_cliente, RESPUESTA_CHECKPOINT_OK);
+                else
+                    responder_codigo(socket_cliente, RESPUESTA_CHECKPOINT_SIN_ESPACIO);
+
+            list_destroy_and_destroy_elements(campos, free);
+            break;
+            }
+
+            case CARGAR_CHECKPOINT:
+            {
+            t_list *campos = recibir_paquete(socket_cliente);
+            char *nombre = list_get(campos, 0);
+            log_info(logger, "## Solicitud Cargar Checkpoint: %s", nombre);
+            uint32_t tamanio = 0;
+            void *contenido = leer_checkpoint(nombre, &tamanio);
+
+                if (contenido == NULL)
+                {
+                    responder_codigo(socket_cliente, RESPUESTA_CHECKPOINT_INEXISTENTE);
+                }
+                else
+                {
+                    t_paquete *respuesta = crear_paquete(RESPUESTA_CHECKPOINT_OK);
+                    agregar_a_paquete(respuesta, contenido, tamanio);
+                    enviar_paquete(respuesta, socket_cliente);
+                    eliminar_paquete(respuesta);
+                    free(contenido);   // leer_checkpoint lo reservó con malloc: lo liberamos nosotros
+                }
+
+            list_destroy_and_destroy_elements(campos, free);
+            break;
+            }
+
+            case ELIMINAR_CHECKPOINT:
+            {
+            t_list *campos = recibir_paquete(socket_cliente);
+            char *nombre = list_get(campos, 0);
+            log_info(logger, "## Solicitud Eliminacion Checkpoint: %s", nombre);
+            
+            if (eliminar_checkpoint(nombre))
+                responder_codigo(socket_cliente, RESPUESTA_CHECKPOINT_OK);
+            else
+                responder_codigo(socket_cliente, RESPUESTA_CHECKPOINT_INEXISTENTE);
+
+            list_destroy_and_destroy_elements(campos, free);
+            break;
+            }           
 
         default:
             log_warning(logger, "## Código de operación desconocido: %d", codigo_operacion);

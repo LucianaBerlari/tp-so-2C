@@ -908,6 +908,47 @@ t_resultado_ejecucion ejecutar_instruccion(
             SYSCALL_REPORT);
     }
 
+    //TODO revisar esto del cp4 !!!!!!
+
+    if (strcmp(instruccion->nombre, "SAVE_CHECKPOINT") == 0)
+    {
+        if (instruccion->cantidad_parametros != 3)
+        {
+            log_error(logger, "SAVE_CHECKPOINT requiere nombre, dirección y tamaño");
+            return EJECUCION_ERROR;
+        }
+        return ejecutar_syscall_memoria(
+            instruccion, jid, socket_placa, socket_dispatch, SYSCALL_SAVE_CHECKPOINT);
+    }
+
+    if (strcmp(instruccion->nombre, "LOAD_CHECKPOINT") == 0)
+    {
+        if (instruccion->cantidad_parametros != 3)
+        {
+            log_error(logger, "LOAD_CHECKPOINT requiere nombre, dirección y tamaño");
+            return EJECUCION_ERROR;
+        }
+        return ejecutar_syscall_memoria(
+            instruccion, jid, socket_placa, socket_dispatch, SYSCALL_LOAD_CHECKPOINT);
+    }
+
+    if (strcmp(instruccion->nombre, "DELETE_CHECKPOINT") == 0)
+    {
+        if (instruccion->cantidad_parametros != 1)
+        {
+            log_error(logger, "DELETE_CHECKPOINT requiere un nombre");
+            return EJECUCION_ERROR;
+        }
+        return ejecutar_syscall_memoria(
+            instruccion, jid, socket_placa, socket_dispatch, SYSCALL_DELETE_CHECKPOINT);
+    }
+
+
+
+
+
+
+
     log_error(logger, "Instruccion desconocida o no implementada %s", instruccion->nombre);
 
     mmu_deslockear_paginas(socket_placa, jid);
@@ -936,19 +977,48 @@ static t_resultado_ejecucion ejecutar_syscall_memoria(
         direccion = obtener_valor_operando(instruccion->parametros[1]);
         tamanio = obtener_valor_operando(instruccion->parametros[2]);
     }
+
+    //para las syscalls del checkpoint 4
+
+     else if (motivo == SYSCALL_SAVE_CHECKPOINT || motivo == SYSCALL_LOAD_CHECKPOINT)
+    {
+        if (instruccion->cantidad_parametros != 3)
+        {
+            log_error(logger, "%s requiere nombre, dirección y tamaño",
+                      motivo == SYSCALL_SAVE_CHECKPOINT ? "SAVE_CHECKPOINT" : "LOAD_CHECKPOINT");
+            return EJECUCION_ERROR;
+        }
+        nombre = instruccion->parametros[0];
+        direccion = obtener_valor_operando(instruccion->parametros[1]);
+        tamanio = obtener_valor_operando(instruccion->parametros[2]);
+    }
+    else if (motivo == SYSCALL_DELETE_CHECKPOINT)
+    {
+        
+        if (instruccion->cantidad_parametros != 1)
+        {
+            log_error(logger, "DELETE_CHECKPOINT requiere un nombre");
+            return EJECUCION_ERROR;
+        }
+        nombre = instruccion->parametros[0];
+        direccion = 0;
+        tamanio = 0;
+    }
     else
     {
         if (instruccion->cantidad_parametros != 2)
         {
-            log_error(
-                logger,
-                "%s requiere dirección y tamaño",
-                motivo == SYSCALL_LABEL ? "LABEL" : "REPORT");
+            log_error(logger, "%s requiere dirección y tamaño",
+                      motivo == SYSCALL_LABEL ? "LABEL" : "REPORT");
             return EJECUCION_ERROR;
         }
         direccion = obtener_valor_operando(instruccion->parametros[0]);
         tamanio = obtener_valor_operando(instruccion->parametros[1]);
     }
+
+    // TODO por las dudas 
+
+
     if (tamanio == 0)
     {
         log_error(logger, "## JID: %u - Tamaño de syscall inválido", jid);

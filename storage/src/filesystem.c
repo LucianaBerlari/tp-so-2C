@@ -244,10 +244,10 @@ static uint32_t * obtener_cadena(t_entrada_directorio*entrada, uint32_t *cantida
 //guardamos tamanio de bytes de contenido en el checkpoint nombre
 // si no exsite lo crea, sino lo reemplaza su contenido
 // devuelve false si no hay lugar
-bool guardar_checkpoint(char*nombre,void*contenido, uint32_t tamanio){
+t_resultado_guardado guardar_checkpoint(char*nombre,void*contenido, uint32_t tamanio){
   if(strlen(nombre)>=TAM_NOMBRE_CHECKPOINT){
       log_error(logger, "Nombre de checkpoint demasiado largo: %s", nombre);
-        return false;
+        return GUARDAR_NOMBRE_INVALIDO;
   }
   pthread_mutex_lock(&mutex_filesystem);
   // numero 1, la entrada del checkpoint si ya existe o una libre si es nuevo
@@ -260,7 +260,7 @@ bool guardar_checkpoint(char*nombre,void*contenido, uint32_t tamanio){
     if(indice ==-1){
         log_error(logger, "## ERROR - Directorio lleno al intentar guardar: %s", nombre);
             pthread_mutex_unlock(&mutex_filesystem);
-            return false;
+            return GUARDAR_DIRECTORIO_LLENO;
     }
   }
 
@@ -295,7 +295,7 @@ for (uint32_t i = cant_reusados; i < cant_nuevos; i++)
         free(viejos);
         free(nuevos);
         pthread_mutex_unlock(&mutex_filesystem);
-        return false;
+        return GUARDAR_SIN_ESPACIO;
     }
     nuevos[i] = libre;
     desde = libre+1; // la proxima busqueda arranca despues de este
@@ -356,7 +356,7 @@ journal_commit(id_asiento);
     free(viejos);
     free(nuevos);
     pthread_mutex_unlock(&mutex_filesystem);
-    return true;
+    return GUARDAR_OK;
 }
  //lee el checkpoint nombre completo
   // devolvemos buffer con su contenido y dejar en *tamanio

@@ -83,13 +83,13 @@ void *solicitud_recuperar_checkpoint_storage(int socket_storage, char *nombre_ar
     else if (cod_op == RESPUESTA_CHECKPOINT_INEXISTENTE)
     {
 
-        log_error(logger,"No se pudo recuperar el checkpoint '%s' - El checkpoint no existe en Storage", nombre_archivo);
+        log_error(logger, "No se pudo recuperar el checkpoint '%s' - El checkpoint no existe en Storage", nombre_archivo);
 
         return NULL;
     }
     else
     {
-        log_error(logger,"Error al recuperar el checkpoint '%s' - Respuesta inesperada de Storage: %d",  nombre_archivo, cod_op);
+        log_error(logger, "Error al recuperar el checkpoint '%s' - Respuesta inesperada de Storage: %d", nombre_archivo, cod_op);
         return NULL;
     }
 }
@@ -99,7 +99,7 @@ bool solicitud_eliminacion_checkpoint_storage(int socket_storage, char *nombre_a
 
     t_paquete *paquete = crear_paquete(ELIMINAR_CHECKPOINT);
     agregar_a_paquete(paquete, nombre_archivo, strlen(nombre_archivo) + 1);
-     enviar_paquete(paquete, socket_storage);
+    enviar_paquete(paquete, socket_storage);
     eliminar_paquete(paquete);
 
     int cod_op = recibir_operacion(socket_storage);

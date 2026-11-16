@@ -13,15 +13,55 @@
 
 static FILE *journal = NULL;
 static uint32_t proximo_id = 1;
-static void resolver_asiento(uint32_t id, t_list*operaciones, bool commiteado, bool aplicado){
+// "0A0B..." -> [0x0A, 0x0B, ...]. Llena 'tamanio' bytes de 'destino'
+static void hexa_a_buffer(char*hexa, uint8_t *destino, uint32_t tamanio){
+    for (uint32_t i=0; i<tamanio; i++){
+        char par[3] = {hexa[2*i], hexa[2*i+1],  '\0'};
+        destino[i] = (uint8_t)strtol(par, NULL, 16);
+    }
+}
+// Rehace en el volumen una linea OP del journal
+static void reaplicar_operacion(char*op){
+    uint32_t a,b,c;
+     // OP_FAT: Entrada 0x00000081 -> Valor 0x0FFFFFFF
+     if(sscanf(op, "OP_FAT: Entrada 0x%X -> Valor 0x%X", &a,&b)==2){
+        escribir_entrada_fat(a,b);
+     }
+     //op write Bloque 0x00000081 - Contenido: 0102
+     else if(sscanf(op, "OP_WRITE: Bloque 0x%X", &a)==1){
+        char *hexa = strstr(op, "Contenido: ")+strlen("Contenido: ");
+        uint8_t*buffer = malloc(geometria.tam_bloque);
+        hexa_a_buffer(hexa,buffer, geometria.tam_bloque);
+        escribir_bloque(a, buffer, "(recuperacion)"); 
+        free(buffer);
+     }
+      // OP_DIR: Directorio 0 - Checkpoint "a" - Tamaño 2 - Bloque Inicial 0x00000081
+      else if(sscanf(op, "OP_DIR: Directorio %u", &a)==1){
+          // el nombre esta entre las dos comillas, y puede estar vacio (RM)
+          char *inicio =strchr(op, '"') +1;
+          char *fin = strchr(inicio, '"');
+          t_entrada_directorio entrada;
+          memset(&entrada, 0, sizeof(entrada));
+          memcpy(entrada.nombre,inicio, fin-inicio);
+           sscanf(fin, "\" - Tamaño %u - Bloque Inicial 0x%X", &b, &c);
+
+           entrada.estado = (fin-inicio>0) ? 1: 0;
+           entrada.tamanio = b;
+           entrada.primer_bloque = c;
+           escribir_entrada_directorio(a, &entrada);
+      }
+}
+//decide que hacer con un asiento que ya terminamos de leer
+static void resolver_asiento(uint32_t id, t_list *operaciones , bool commiteado, bool aplicado){
     if(commiteado && !aplicado){
-        // re aplicamos las operaciones
-        log_info(logger,  "## Recuperación - Asiento: %u - APLICADO", id);
+        for (int i=0; i<list_size(operaciones); i++)
+        reaplicar_operacion(list_get(operaciones, i));
+        log_info(logger, "## Recuperación - Asiento: %u - APLICADO", id);
     }
     else{
         log_info(logger, "## Recuperación - Asiento: %u - DESCARTADO", id);
     }
-    list_clean_and_destroy_elements(operaciones,free); // vacio la lista para el proximo
+    list_clean_and_destroy_elements(operaciones, free);
 }
 // recorre el journal de principio a fin, asiento por asiento
 static void recuperar_journal(char*path){
@@ -78,10 +118,13 @@ void iniciar_journal(void){
         char *path = string_from_format("%s%s", storage_config->PATH_STORAGE, NOMBRE_JOURNAL);
         recuperar_journal(path);
 
-        // a = append, siempre escribe al final y no borrara lo anterior 
-        // lo que quedo de una ejecuccion anterior, lo vamos a necesitar para recuperar
+            
+        // lo que reaplico la recuperacion lo aseguramos en disco antes de borrar el journal
+             fsync(fileno(volumen));
+           
+         // "w" = vacia el journal: todos sus asientos ya estan aplicados o descartados
 
-        journal = fopen(path, "a");
+        journal = fopen(path, "w");
         if (journal == NULL){
             log_error(logger, "No se puede abrir el journal: %s", path);
             free(path);

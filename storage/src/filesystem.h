@@ -46,6 +46,14 @@ typedef struct{
 
 }t_geometria;
 
+typedef enum
+{
+    GUARDAR_OK,
+    GUARDAR_SIN_ESPACIO,       // no alcanzan los bloques libres en la FAT
+    GUARDAR_DIRECTORIO_LLENO,  // no hay entrada libre en el directorio
+    GUARDAR_NOMBRE_INVALIDO    // el nombre no entra en 23 bytes
+} t_resultado_guardado;
+
 extern t_geometria geometria; // variable del tipo de struct definido anteriormente
 extern FILE *volumen;
 void calcular_geometria(void); // prototipo de una funcion, que sirve para el archivo que incluya el .h
@@ -56,7 +64,7 @@ void leer_entrada_directorio(uint32_t indice, t_entrada_directorio *entrada);
 void escribir_entrada_directorio(uint32_t indice, t_entrada_directorio *entrada);
 void leer_bloque(uint32_t nro_bloque, void *buffer, char *checkpoint);
 void escribir_bloque(uint32_t nro_bloque, void *buffer, char *checkpoint);
-bool guardar_checkpoint(char *nombre, void *contenido, uint32_t tamanio);
+t_resultado_guardado guardar_checkpoint(char *nombre, void *contenido, uint32_t tamanio);
 void *leer_checkpoint(char *nombre, uint32_t *tamanio);
 bool eliminar_checkpoint(char *nombre);
 void mostrar_superbloque(void);
